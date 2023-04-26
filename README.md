@@ -1,0 +1,288 @@
+# SupraSeal
+
+**This repository is under active development and has not been verified for production use on mainnet yet.**
+
+SupraSeal is a highly optimized collection of Filecoin sealing primitives intended to be used by storage providers who require high throughput. The PC1, PC2, C1, and C2 subsections provide more details on usage. Note this is not a standalone library, the primitives are intended to be used in a storage providers application of choice.
+
+TODO:
+- Incorporate C2
+- CPU single replica encoding (K + D)
+- Single/Multi-core Tree R generation
+- GPU single Tree R generation
+- Expose interface to calculate Comm R from external Tree R root
+- Support non-CC Tree D inclusion proofs
+- Break out for Tree D and Tree R inclusion proofs
+- Expose interface to pack C1 output with external Tree D and R proofs
+
+# Architecture and Design Considerations
+
+## Sealing Operations
+
+For a single sector, the sealing operation is comprised of the following operations: Add Piece, Pre-commit 1, Pre-commit 2, Wait Seed, Commit 1, and Commit 2. In order to maximize application flexibility, SupraSeal is designed to handle a subset of these operations independently. 
+- **Add Piece**: the process of concatenating pieces of data in order to fill a sector (e.g. 32GB). SupraSeal does not address this operation given the trivial compute requirements and large number of possible ways to ingest data.
+- **Pre-commit 1 (PC1)**: the generation of the stacked depth robust graph. SupraSeal parallelizes this operation across a power of 2 number of sectors, up to 128, and is designed to maximize throughput.
+- **Pre-commit 2 (PC2)**: the creation of two merkle trees comprised of the graph columns and replica. SupraSeal supports the generation of tree c across the parallel sectors created by PC1. For Committed Capacity (CC) sectors, SupraSeal supports the parallel generation of tree r. Alternatively for non-CC sectors (customer data), SupraSeal offers GPU and CPU based single sector replica encoding and tree r generation.
+- **Wait Seed**: the 150 epoch (~75 minute) gap between submission of pre-commit2 and the availability of randomness (seed) from the chain. SupraSeal does not interact with the chain, therefore relies on the application for obtaining the seed.
+- **Commit 1 (C1)**: the generation of node challenges using the seed. SupraSeal will build the inclusion proofs from the parallel layers generated in PC1 and the merkle trees for PC2. The C1 api operates on a single sector at a time, as opposed to PC1 and PC2 which operate on all sectors at once. The reason is each sector will have a different set of challenges, thus making the parallelization less effective. If working with non-CC (customer data) sectors, then tree D and tree R must be provided to SupraSeal. Both trees can be generated using deal data through standalone SupraSeal utilities.
+- **Commit 2 (C2)**: the zkSNARK proof generation using the inclusion proofs from C1. SupraSeal provides the post constraint evaluation portion of the Groth16 proof. There is no complete C2 api within SupraSeal, the expectation is the heavy Groth16 compute function is integrated directly into the existing Filecoin C2 apis.
+
+For a more detailed discussion of PC1 see [src/pc1/README.md](src/pc1/README.md).
+
+## Intended Usage
+
+There are two primary methods for storage providers to participate in the Filecoin network, either by providing CC sectors or servicing customer data. How one uses SupraSeal depends on these methods. Here is a sample flow to consider when building an application on top of SupraSeal.
+
+```mermaid
+flowchart TD;
+    Start[Start] --> SisCC{Is CC?};
+    SisCC --> |Yes| C;
+    SisCC --> |No| AP[Add Piece];
+    AP --> PD{Piece Full?};
+    PD --> |No| Start;
+    PD --> |Yes| B[Build Tree D];
+    B --> C[Calculate Replica ID];
+    C --> BR{Batch Ready?};
+    BR --> |Yes| BG[Build Graph];
+    BR --> |No| Start;
+    subgraph SupraSeal PC1;
+    BG;
+    end;
+    subgraph SupraSeal PC2 TreeC;
+    BG --> |Parallel Labels| E[Calculate Column Digests];
+    E --> F[Build Tree C];
+    end;
+    BG --> pc2cc{Is CC?};
+    pc2cc --> |Yes <br/>Parallel Layers| G[Build Tree R];
+    pc2cc --> |No <br/>Single Layer| sRep[Calculate Replica];
+    subgraph SupraSeal PC2 Parallel TreeR;
+    G;
+    end;
+    subgraph SupraSeal PC2 Comm R;
+    G --> |Comm R Last| H[Calculate Comm R];
+    F --> |Comm C| H;
+    end;
+    subgraph SupraSeal PC2 Single TreeR;
+    sRep --> sTR[Build Tree R Single];
+    end;
+    sTR --> |Comm R Last| H;
+    H --> WS[Wait Seed];
+    WS --> c1Cc{Is CC?};
+    c1Cc --> |No| rTD[Build Tree D & R Proofs];
+    c1Cc --> |Yes| TD[Build Tree D & R Proofs];
+    WS --> CP;
+    WS --> LP;
+    subgraph SupraSeal C1 Local ;
+    TD[Build Tree D & R Proofs];
+    CP[Build Column Proofs];
+    LP[Build Label Proofs];
+    TD --> c1out[C1 Output];
+    CP --> c1out;
+    LP --> c1out;
+    end;
+    subgraph SupraSeal C1 Remote ;
+    rTD[Build Tree D & R Proofs];
+    end;
+    rTD --> c1out;
+    c1out --> r1cs[R1CS Generation];
+    subgraph SupraSeal C2;
+    r1cs --> GP[Calculate Groth16 Proof];
+    end;
+```
+
+## Object Sizes 
+
+The table below outlines the object sizes to expect for a 32 GB sector. The total data for a parallel operation would be these values * the number of sectors. Keep this in mind when provisioning hardware. This will impact NVMe and hard drive capacity, memory, and network bandwidth.
+
+| Object       | Size  | Notes    |
+|--------------|:-----:|-----------| 
+| Piece File |  32 GB | Data to be sealed | 
+| Tree D |  64 GB | Piece File is leaves, binary tree on top |
+| Replica ID | 32 B | Derived unique identifier for each sector |
+| Stacked DRG | 352 GB | PC1 Graph is layers (11) * num_nodes (1B) * 32 B |
+| Tree C |  36.6 GB | 8 - arity tree with num_nodes (1B) * 32 B leaves |
+| Comm C | 32 B | Tree C Commitment (root of tree C) |
+| Tree R |  73.1 MB | Same as Tree C expect leaves are replica and discard 2 rows |
+| Tree R Root | 32 B | Root of Tree R |
+| Comm R | 32 B | Poseidon hash of Tree C Root || Tree R Root |
+| DRG last layer (Key) | 32 GB | Last layer of DRG is the key to encode replica | 
+| Replica | 32 GB | Output of sealing process, Piece File + Key |
+| Tree D Inclusion Paths | 265 KB | Merkle tree D inclusion paths for C1 challenges |
+| Tree R Inclusion Paths | 435 KB | Merkle tree R inclusion paths for C1 challenges |
+| C1 Output | 10.5 MB | Result of C1 to provide C2 for proving |
+
+## API
+
+The CC sector API is very straightforward, we have demo code for both C and Rust access. 
+
+```
+// Optional init function. If used this must be the first library
+// function called.
+// \config_file       Topology config file. Defaults to supra_config.cfg
+void supra_seal_init(const char* config_file);
+
+// Returns the highest node offset address in the NVMe array. This is useful
+//  for calculating if a new PC1 batch of parallel sectors will fit.
+size_t get_max_block_offset();
+
+// Returns the size of a PC1 batch for the specified number of parallel sectors.
+// Used to calculate the next block offset as well as to determine if
+//  enough NVMe space is available.
+size_t get_slot_size(size_t num_sectors);
+
+// Perform PC1 operation on a number of sectors in parallel
+//
+// \block_offset      Index within NVMe to store graph
+// \num_sectors       Number of sectors to operate on in parallel
+// \replica_ids       Flattened array of ReplicaIds for all sectors 
+// \parents_filename  Filesystem location of parents graph cache file
+int pc1(size_t block_offset,
+        size_t num_sectors,
+        const uint8_t* replica_ids,
+        const char* parents_filename);
+
+// Perform PC2 operation on a number of sectors in parallel
+//
+// \block_offset      Index within NVMe to retrieve graph
+// \num_sectors       Number of sectors to operate on in parallel
+// \output_dir        Filesystem location to store results (trees, p_aux, etc)
+int pc2(size_t block_offset,
+        size_t num_sectors,
+        const char* output_dir);
+
+// Perform C1 operation on a single sector
+//
+// \block_offset      Index within NVMe to retrieve graph
+// \num_sectors       Number of sectors that are in graph, used to index
+// \sector_slot       Index in sectors for this sector
+// \replica_id        Sector ReplicaId
+// \seed              Sector wait seed result to use for challenge generation
+// \ticket            Original ticket used in ReplicaId generation
+// \cache_path        Filesystem location of pc2 results and to store output
+// \parents_filename  Filesystem location of parents graph cache file
+int c1(size_t block_offset,
+       size_t num_sectors,
+       size_t sector_slot,
+       const uint8_t* replica_id,
+       const uint8_t* seed,
+       const uint8_t* ticket,
+       const char* cache_path,
+       const char* parents_filename);
+```
+
+# Reference Platform
+
+We will specify a reference configuration with the final release of the software. Our current testing configuration consists of:
+- Threadripper PRO 5975WX
+- ASUS WRX80E SAGE Motherboard
+- 256GB Memory
+- 15 Samsung 7.68TB U.2 Drives
+- 4 Supermicro AOC-SLG4-4E4T NVMe HBA 
+- Nvidia RTX 4090
+- Ubuntu 22.04
+- SPDK v22.09
+
+# Prerequisites
+
+### Install dependencies
+```
+sudo apt install libconfig++-dev
+```
+
+### Enable Huge Pages (1GB):
+```
+sudo vi /etc/default/grub
+GRUB_CMDLINE_LINUX_DEFAULT="default_hugepagesz=1G hugepagesz=1G hugepages=128"
+GRUB_CMDLINE_LINUX="default_hugepagesz=1G hugepagesz=1G hugepages=128"
+sudo update-grub
+sudo reboot
+```
+
+You can confirm huge pages are enabled with:
+```
+grep Huge /proc/meminfo
+
+# Look for:
+HugePages_Total:     128
+HugePages_Free:      128
+```
+
+Additionally uou may need to enable huge pages after boot using:
+```
+sudo sysctl -w vm.nr_hugepages=128
+```
+
+Due to the random reads, if the page table was built with 4KB pages then there would be a significant number of costly faults. Moving to 1GB pages alleviates this problem.
+
+### Install CUDA
+
+If CUDA is not already installed, the latest toolkit is available [here](https://developer.nvidia.com/cuda-downloads)
+
+### Build this repository
+
+During the build process it will clone and build SPDK, sppark, and blst. 
+```
+./build.sh
+```
+
+SPDK must be setup after every reboot:
+```
+cd spdk-v22.09
+sudo env NRHUGE=128 ./scripts/setup.sh
+```
+
+# Configuration
+
+The software is configured using the file `src/demos/rust/supra_seal.cfg`. This file contains the core topology used (assigning threads to cores) as well as the NVMe configuration. There is also a configuration `src/demos/rust/supra_seal_zen2.cfg` that assigns one hashing thread (2 sectors) per physical core rather than the default of 2 hashing threads per physical core intended for systems older than Zen3. The configuration file can be changed in `src/sealing/main.cpp` and `rust-demo/src/main.rs`.
+
+### NVMe
+
+The NVMe configuration must be adapted to the local system. SPDK can be used to identify attached NVMe devices and their addresses with the following command:
+```
+sudo ./scripts/setup.sh status
+```
+
+For more extensive information about attached devices:
+```
+sudo ./build/examples/identify
+```
+
+This will show the NVMe disks (controllers) along with their addresses, which will resemble `0000:2c:00.0`. The address list in `supra_seal.cfg` should be updated for the local drives.
+
+### NVMe Performance Testing
+
+This software requires NVMe drives that support a high amount of random read IOPS. SPDK has a performance tester in the example directory that can be used to measure the random read IOPS of your devices. In order to minimize PC1 latency the software targets approximately 10-15M IOPS at the system level, and with drives like the [Samsung PM9A3](https://semiconductor.samsung.com/ssd/datacenter-ssd/pm9a3/) we generally see around 1M IOPS per drive.
+```
+build/examples/perf -b <disk pcie address> -q 64 -o 4096 -w randread -t 10
+```
+
+### Local filesystem
+
+The PC2 and C1 processes write files into the local filesystem (`/var/tmp/supra_seal`). For best performance this should be a dedicated disk, ideally a separate disk from where the parent cache is stored so that writing during PC2 does not impact read performance during PC1. The simplest way is to symlink `/var/tmp/supra_seal` to the desired location, but those paths can also be adjusted in `src/sealing/main.cpp` and `rust-demo/src/main.rs`.
+
+# Running
+
+There are both Rust and c++ based demos that will perform PC1, PC2, and C1 on multiple pipelines. They both demonstrate concurrent PC1/PC2/C1 processes along the lines of the flowchart below. The main constraints exist around PC1 and PC2, which respectively utilize the CPU core and GPU(s) heavily so care must be taken to stage them for best performance. For example two PC1's or two PC2's should not typically be run concurrently. 
+
+```mermaid
+flowchart TD
+
+    subgraph Pipeline B
+        B0(PC1) --> B1(PC2)
+        B1 --> B2(C1)
+    end
+    subgraph Pipeline A
+        A0(PC1) --> A1(PC2)
+        A1 --> A2(C1)
+    end
+   
+    A0 -->|await completion|B0
+    A1 -->|await completion|B1
+```
+
+```
+# Rust
+./exec.sh
+
+# C++
+sudo ./seal
+```
