@@ -120,12 +120,15 @@ fi
 if [ ! -d "deps/sppark" ]; then
     cd deps
     git clone https://github.com/supranational/sppark.git
-    cd ..
+    cd sppark
+    git checkout aeca55d
+    cd ../..
 fi
 if [ ! -d "deps/blst" ]; then
     cd deps
     git clone https://github.com/supranational/blst.git
     cd blst
+    git checkout d3f9bd3
     ./build.sh
     cd ../..
 fi
