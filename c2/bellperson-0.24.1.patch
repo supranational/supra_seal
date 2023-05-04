@@ -1,0 +1,236 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index b5fd13d..f23f729 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -36,6 +36,7 @@ blstrs = { version = "0.6.0", features = ["__private_bench"] }
+ pairing = "0.22"
+ ec-gpu = { version = "0.2.0" }
+ ec-gpu-gen = { version = "0.5.0" }
++supraseal-c2 = { path = ".." }
+
+ fs2 = { version = "0.4.3", optional = true }
+
+diff --git a/src/groth16/proof.rs b/src/groth16/proof.rs
+index 0afb4f2..b076c89 100644
+--- a/src/groth16/proof.rs
++++ b/src/groth16/proof.rs
+@@ -9,6 +9,7 @@ use rayon::prelude::*;
+ use serde::de::Visitor;
+ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
++#[repr(C)]
+ #[derive(Clone, Debug)]
+ pub struct Proof<E: Engine> {
+     pub a: E::G1Affine,
+diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
+index 49c3c20..2852974 100644
+--- a/src/groth16/prover.rs
++++ b/src/groth16/prover.rs
+@@ -256,7 +256,12 @@ where
+     E::G1Affine: GpuName,
+     E::G2Affine: GpuName,
+ {
+-    create_proof_batch_priority_inner(circuits, params, None, priority)
++    if circuits.len() == 1 {
++        create_proof_batch_priority_inner(circuits, params, None, priority)
++    }
++    else {
++        create_proof_batch_priority_inner_modified(circuits, params, None, priority)
++    }
+ }
+
+ /// creates a batch of proofs where the randomization vector is already
+@@ -276,7 +281,12 @@ where
+     E::G1Affine: GpuName,
+     E::G2Affine: GpuName,
+ {
+-    create_proof_batch_priority_inner(circuits, params, Some((r_s, s_s)), priority)
++    if circuits.len() == 1 {
++        create_proof_batch_priority_inner(circuits, params, Some((r_s, s_s)), priority)
++    }
++    else {
++        create_proof_batch_priority_inner_modified(circuits, params, Some((r_s, s_s)), priority)
++    }
+ }
+
+ #[allow(clippy::type_complexity)]
+@@ -786,3 +796,179 @@ mod tests {
+         }
+     }
+ }
++
++#[allow(clippy::type_complexity)]
++#[allow(clippy::needless_collect)]
++fn create_proof_batch_priority_inner_modified<E, C, P: ParameterSource<E>>(
++    circuits: Vec<C>,
++    params: P,
++    randomization: Option<(Vec<E::Fr>, Vec<E::Fr>)>,
++    _priority: bool,
++) -> Result<Vec<Proof<E>>, SynthesisError>
++where
++    E: MultiMillerLoop,
++    C: Circuit<E::Fr> + Send,
++    E::Fr: GpuName,
++    E::G1Affine: GpuName,
++    E::G2Affine: GpuName,
++{
++    let (
++        start,
++        provers,
++        input_assignments_no_repr,
++        aux_assignments_no_repr,
++    ) = synthesize_circuits_batch_modified(circuits)?;
++
++    let input_assignment_len = input_assignments_no_repr[0].len();
++    let aux_assignment_len = aux_assignments_no_repr[0].len();
++    let vk = params.get_vk(input_assignment_len)?.clone();
++    let n = provers[0].a.len();
++    let a_aux_density_total = provers[0].a_aux_density.get_total_density();
++    let b_input_density_total = provers[0].b_input_density.get_total_density();
++    let b_aux_density_total = provers[0].b_aux_density.get_total_density();
++    let num_circuits = provers.len();
++
++    if (vk.delta_g1.is_identity() | vk.delta_g2.is_identity()).into() {
++        // If this element is zero, someone is trying to perform a
++        // subversion-CRS attack.
++        return Err(SynthesisError::UnexpectedIdentity);
++    }
++
++    let (r_s, s_s) = randomization.unwrap_or((
++        vec![E::Fr::zero(); num_circuits],
++        vec![E::Fr::zero(); num_circuits],
++    ));
++
++    // Make sure all circuits have the same input len.
++    for prover in &provers {
++        assert_eq!(
++            prover.a.len(),
++            n,
++            "only equaly sized circuits are supported"
++        );
++        debug_assert_eq!(
++            a_aux_density_total,
++            prover.a_aux_density.get_total_density(),
++            "only identical circuits are supported"
++        );
++        debug_assert_eq!(
++            b_input_density_total,
++            prover.b_input_density.get_total_density(),
++            "only identical circuits are supported"
++        );
++        debug_assert_eq!(
++            b_aux_density_total,
++            prover.b_aux_density.get_total_density(),
++            "only identical circuits are supported"
++        );
++    }
++
++    let mut input_assignments_ref = Vec::with_capacity(num_circuits);
++    let mut aux_assignments_ref = Vec::with_capacity(num_circuits);
++    for i in 0..num_circuits {
++        input_assignments_ref.push(input_assignments_no_repr[i].as_ptr() as *const _ as *const E::Fr);
++        aux_assignments_ref.push(aux_assignments_no_repr[i].as_ptr() as *const _ as *const E::Fr);
++    }
++
++    let mut a_ref = Vec::with_capacity(num_circuits);
++    let mut b_ref = Vec::with_capacity(num_circuits);
++    let mut c_ref = Vec::with_capacity(num_circuits);
++
++    for i in 0..num_circuits {
++        a_ref.push(provers[i].a.as_ptr());
++        b_ref.push(provers[i].b.as_ptr());
++        c_ref.push(provers[i].c.as_ptr());
++    }
++
++    let mut proofs: Vec<Proof<E>> = Vec::with_capacity(num_circuits);
++    unsafe { proofs.set_len(num_circuits); }
++
++    supraseal_c2::generate_groth16_proof(
++        a_ref.as_slice(),
++        b_ref.as_slice(),
++        c_ref.as_slice(),
++        provers[0].a.len(),
++        input_assignments_ref.as_mut_slice(),
++        aux_assignments_ref.as_mut_slice(),
++        input_assignment_len,
++        aux_assignment_len,
++        &provers[0].a_aux_density.bv.as_raw_slice().to_vec(),
++        &provers[0].b_aux_density.bv.as_raw_slice().to_vec(),
++        a_aux_density_total,
++        b_aux_density_total,
++        num_circuits,
++        r_s.as_slice(),
++        s_s.as_slice(),
++        proofs.as_mut_slice(),
++    );
++
++    let proof_time = start.elapsed();
++    info!("prover time: {:?}", proof_time);
++
++    Ok(proofs)
++}
++
++#[allow(clippy::type_complexity)]
++fn synthesize_circuits_batch_modified<Scalar, C>(
++    circuits: Vec<C>,
++) -> Result<
++    (
++        Instant,
++        std::vec::Vec<ProvingAssignment<Scalar>>,
++        std::vec::Vec<std::sync::Arc<std::vec::Vec<Scalar>>>,
++        std::vec::Vec<std::sync::Arc<std::vec::Vec<Scalar>>>,
++    ),
++    SynthesisError,
++>
++where
++    Scalar: PrimeField,
++    C: Circuit<Scalar> + Send,
++{
++    let start = Instant::now();
++
++    let mut provers = circuits
++        .into_par_iter()
++        .map(|circuit| -> Result<_, SynthesisError> {
++            let mut prover = ProvingAssignment::new();
++
++            prover.alloc_input(|| "", || Ok(Scalar::one()))?;
++
++            circuit.synthesize(&mut prover)?;
++
++            for i in 0..prover.input_assignment.len() {
++                prover.enforce(|| "", |lc| lc + Variable(Index::Input(i)), |lc| lc, |lc| lc);
++            }
++
++            Ok(prover)
++        })
++        .collect::<Result<Vec<_>, _>>()?;
++
++    info!("synthesis time: {:?}", start.elapsed());
++
++    // Start fft/multiexp prover timer
++    let start = Instant::now();
++    info!("starting proof timer");
++
++    let input_assignments_no_repr = provers
++        .par_iter_mut()
++        .map(|prover| {
++            let input_assignment = std::mem::take(&mut prover.input_assignment);
++            Arc::new(input_assignment)
++        })
++        .collect::<Vec<_>>();
++
++    let aux_assignments_no_repr = provers
++        .par_iter_mut()
++        .map(|prover| {
++            let aux_assignment = std::mem::take(&mut prover.aux_assignment);
++            Arc::new(aux_assignment)
++        })
++        .collect::<Vec<_>>();
++
++    Ok((
++        start,
++        provers,
++        input_assignments_no_repr,
++        aux_assignments_no_repr,
++    ))
++}

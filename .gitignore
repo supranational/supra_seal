@@ -1,7 +1,13 @@
-/src/demos/rust/target
+**/target
+/c2/bellperson
 /deps
 /obj
 *~
 /seal
 *.log
 *.swp
+*.lock
+/c1
+/tree_r
+/tree_r_cpu
+/bin

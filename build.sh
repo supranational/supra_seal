@@ -10,14 +10,17 @@ if [ "$1" == "512MiB" ]; then
     SECTOR_SIZE="-DSECTOR_SIZE_512MiB"
 fi
 
-CUDA="/usr/local/cuda"
-NVCC="$CUDA/bin/nvcc"
+CXX=${CXX:-c++}
+NVCC=${NVCC:-nvcc}
+
+CUDA=$(dirname $(dirname $(which $NVCC)))
 SPDK="deps/spdk-v22.09"
+CUDA_ARCH="-arch=sm_80 -gencode arch=compute_70,code=sm_70"
 
 INCLUDE="-I$SPDK/include -I$SPDK/isa-l/.. -I$SPDK/dpdk/build/include"
-CFLAGS="$SECTOR_SIZE -g $INCLUDE"
+CFLAGS="$SECTOR_SIZE -O2 -g $INCLUDE -D__ADX__"
 CPPFLAGS="$CFLAGS \
-          -fno-omit-frame-pointer -g -O2 -Wall -Wextra -Wno-unused-parameter \
+          -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter \
           -Wno-missing-field-initializers -fno-strict-aliasing \
           -march=native -Wformat -Wformat-security \
           -D_GNU_SOURCE -fPIC -fstack-protector \
@@ -107,59 +110,57 @@ fi
 rm -fr obj
 mkdir -p obj
 
+rm -fr bin
+mkdir -p bin
+
 mkdir -p deps
-if [ ! -d "deps/spdk-v22.09" ]; then
-    cd deps
-    git clone --branch v22.09 https://github.com/spdk/spdk --recursive spdk-v22.09
-    cd spdk-v22.09/
-    sudo scripts/pkgdep.sh
-    ./configure --with-virtio --with-vhost
-    make -j 10
-    cd ../..
+if [ ! -d $SPDK ]; then
+    git clone --branch v22.09 https://github.com/spdk/spdk --recursive $SPDK
+    (cd $SPDK
+     sudo scripts/pkgdep.sh
+     ./configure --with-virtio --with-vhost
+     make -j 10)
 fi
 if [ ! -d "deps/sppark" ]; then
-    cd deps
-    git clone https://github.com/supranational/sppark.git
-    cd sppark
-    git checkout aeca55d
-    cd ../..
+    git clone https://github.com/supranational/sppark.git deps/sppark
 fi
 if [ ! -d "deps/blst" ]; then
-    cd deps
-    git clone https://github.com/supranational/blst.git
-    cd blst
-    git checkout d3f9bd3
-    ./build.sh
-    cd ../..
+    git clone https://github.com/supranational/blst.git deps/blst
+    (cd deps/blst
+     ./build.sh -D__ADX__)
+fi
+if [ ! -d "c2/bellperson" ]; then
+    git clone https://github.com/filecoin-project/bellperson.git -b v0.24.1 c2/bellperson
+    (cd c2/bellperson
+     git apply ../bellperson-0.24.1.patch)
 fi
 
-gcc -c src/sha/sha_ext_mbx2.S -o obj/sha_ext_mbx2.o
+gcc -c sha/sha_ext_mbx2.S -o obj/sha_ext_mbx2.o
 
 # Generate .h files for the Poseidon constants
-xxd -i src/poseidon/constants/constants_2  > obj/constants_2.h
-xxd -i src/poseidon/constants/constants_4  > obj/constants_4.h
-xxd -i src/poseidon/constants/constants_8  > obj/constants_8.h
-xxd -i src/poseidon/constants/constants_11 > obj/constants_11.h
-xxd -i src/poseidon/constants/constants_16 > obj/constants_16.h
-xxd -i src/poseidon/constants/constants_24 > obj/constants_24.h
-xxd -i src/poseidon/constants/constants_36 > obj/constants_36.h
+xxd -i poseidon/constants/constants_2  > obj/constants_2.h
+xxd -i poseidon/constants/constants_4  > obj/constants_4.h
+xxd -i poseidon/constants/constants_8  > obj/constants_8.h
+xxd -i poseidon/constants/constants_11 > obj/constants_11.h
+xxd -i poseidon/constants/constants_16 > obj/constants_16.h
+xxd -i poseidon/constants/constants_24 > obj/constants_24.h
+xxd -i poseidon/constants/constants_36 > obj/constants_36.h
 
 # PC1
-c++ $CPPFLAGS -o obj/pc1.o -c src/pc1/pc1.cpp &
+$CXX $CPPFLAGS -Ideps/sppark/util -o obj/pc1.o -c pc1/pc1.cpp &
 
 # PC2
-c++ $CPPFLAGS -o obj/column_reader.o -c src/pc2/column_reader.cpp &
-$NVCC $CFLAGS -std=c++17 -DNO_SPDK -D__ADX__ -Xcompiler -Wno-subobject-linkage -Xcompiler -O2 \
-      -Ideps/sppark -Ideps/blst/src -arch=sm_75 -dc src/pc2/cuda/pc2.cu -o obj/pc2.o &
-$NVCC $CFLAGS -std=c++17 -DNO_SPDK -D__ADX__ -Xcompiler -Wno-subobject-linkage -Xcompiler -O2 \
-      -Ideps/sppark -Ideps/blst/src -arch=sm_75 -dlink src/pc2/cuda/pc2.cu -o obj/pc2_link.o &
+$CXX $CPPFLAGS -o obj/streaming_node_reader_nvme.o -c nvme/streaming_node_reader_nvme.cpp &
+$CXX $CPPFLAGS -o obj/ring_t.o -c nvme/ring_t.cpp &
+$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
+      -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dc pc2/cuda/pc2.cu -o obj/pc2.o &
+$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
+      -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dlink pc2/cuda/pc2.cu -o obj/pc2_link.o &
 
-c++ $CPPFLAGS -c src/c1/c1.cpp -o obj/c1.o -Wno-subobject-linkage \
-    -Ideps/sppark -Ideps/blst/src &
+$CXX -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
 
-c++ -c src/sealing/sector_parameters.cpp -o obj/sector_parameters.o
-
-c++ $CPPFLAGS $INCLUDE -c src/sealing/supra_seal.cpp -o obj/supra_seal.o -Wno-subobject-linkage &
+$CXX $CPPFLAGS $INCLUDE -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
+    -c sealing/supra_seal.cpp -o obj/supra_seal.o -Wno-subobject-linkage &
 
 wait
 
@@ -167,17 +168,33 @@ ar rvs obj/libsupraseal.a \
    obj/pc1.o \
    obj/pc2.o \
    obj/pc2_link.o \
-   obj/c1.o \
+   obj/ring_t.o \
+   obj/streaming_node_reader_nvme.o \
    obj/supra_seal.o \
-   obj/column_reader.o \
    obj/sector_parameters.o \
    obj/sha_ext_mbx2.o
 
-c++ $CPPFLAGS -Ideps/sppark -Ideps/blst/src \
-    -g -o seal src/demos/main.cpp \
+$CXX $CPPFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
+    -g -o bin/seal demos/main.cpp \
     -Lobj -lsupraseal \
-    $LDFLAGS -Ldeps/blst -lblst -L$CUDA/lib64 -lcudart -lgmp -lconfig++ &
+    $LDFLAGS -Ldeps/blst -lblst -L$CUDA/lib64 -lcudart_static -lgmp -lconfig++ &
 
+$CXX -DSECTOR_SIZE_512MiB -march=native -Wno-subobject-linkage \
+    tools/c1.cpp sealing/sector_parameters.cpp util/debug_helpers.cpp \
+    -o bin/c1 -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst -lgmp &
+
+# tree-r CPU only
+$CXX -g -Wall -Wextra -Werror -Wno-subobject-linkage -march=native -O3 \
+    tools/tree_r.cpp \
+    -o bin/tree_r_cpu -Iposeidon -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst &
+
+# tree-r CPU + GPU
+$NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
+     -g -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
+     -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
+     -Xcompiler -march=native -O3 \
+     -x cu tools/tree_r.cpp -o bin/tree_r \
+     -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++
 
 wait
 

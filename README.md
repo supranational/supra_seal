@@ -4,16 +4,6 @@
 
 SupraSeal is a highly optimized collection of Filecoin sealing primitives intended to be used by storage providers who require high throughput. The PC1, PC2, C1, and C2 subsections provide more details on usage. Note this is not a standalone library, the primitives are intended to be used in a storage providers application of choice.
 
-TODO:
-- Incorporate C2
-- CPU single replica encoding (K + D)
-- Single/Multi-core Tree R generation
-- GPU single Tree R generation
-- Expose interface to calculate Comm R from external Tree R root
-- Support non-CC Tree D inclusion proofs
-- Break out for Tree D and Tree R inclusion proofs
-- Expose interface to pack C1 output with external Tree D and R proofs
-
 # Architecture and Design Considerations
 
 ## Sealing Operations
@@ -26,7 +16,7 @@ For a single sector, the sealing operation is comprised of the following operati
 - **Commit 1 (C1)**: the generation of node challenges using the seed. SupraSeal will build the inclusion proofs from the parallel layers generated in PC1 and the merkle trees for PC2. The C1 api operates on a single sector at a time, as opposed to PC1 and PC2 which operate on all sectors at once. The reason is each sector will have a different set of challenges, thus making the parallelization less effective. If working with non-CC (customer data) sectors, then tree D and tree R must be provided to SupraSeal. Both trees can be generated using deal data through standalone SupraSeal utilities.
 - **Commit 2 (C2)**: the zkSNARK proof generation using the inclusion proofs from C1. SupraSeal provides the post constraint evaluation portion of the Groth16 proof. There is no complete C2 api within SupraSeal, the expectation is the heavy Groth16 compute function is integrated directly into the existing Filecoin C2 apis.
 
-For a more detailed discussion of PC1 see [src/pc1/README.md](src/pc1/README.md).
+For a more detailed discussion of PC1 see [pc1/README.md](pc1/README.md).
 
 ## Intended Usage
 
@@ -185,17 +175,15 @@ We will specify a reference configuration with the final release of the software
 
 ### Install dependencies
 ```
-sudo apt install libconfig++-dev
+sudo apt install build-essential libconfig++-dev libgmp-dev
+```
 
-If gmp is not already installed:
-wget https://gmplib.org/download/gmp/gmp-6.2.1.tar.lz
-tar --lzip -xf gmp-6.2.1.tar.lz
-cd gmp-6.2.1/
-./configure --enable-cxx
-make -j2
-make check
-sudo make install
-cd ..
+Install Rust if necessary
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+rustup toolchain install nightly
+rustup default nightly
 ```
 
 ### Enable Huge Pages (1GB):
@@ -227,6 +215,8 @@ Due to the random reads, if the page table was built with 4KB pages then there w
 
 If CUDA is not already installed, the latest toolkit is available [here](https://developer.nvidia.com/cuda-downloads)
 
+The minimum version required is 11.x
+
 ### Build this repository
 
 During the build process it will clone and build SPDK, sppark, and blst. 
@@ -242,7 +232,7 @@ sudo env NRHUGE=128 ./scripts/setup.sh
 
 # Configuration
 
-The software is configured using the file `src/demos/rust/supra_seal.cfg`. This file contains the core topology used (assigning threads to cores) as well as the NVMe configuration. There is also a configuration `src/demos/rust/supra_seal_zen2.cfg` that assigns one hashing thread (2 sectors) per physical core rather than the default of 2 hashing threads per physical core intended for systems older than Zen3. The configuration file can be changed in `src/demos/main.cpp` and `src/demos/rust/main.rs`.
+The software is configured using the file `demos/rust/supra_seal.cfg`. This file contains the core topology used (assigning threads to cores) as well as the NVMe configuration. There is also a configuration `demos/rust/supra_seal_zen2.cfg` that assigns one hashing thread (2 sectors) per physical core rather than the default of 2 hashing threads per physical core intended for systems older than Zen3. The configuration file can be changed in `demos/main.cpp` and `demos/rust/main.rs`.
 
 ### NVMe
 
@@ -267,26 +257,41 @@ build/examples/perf -b <disk pcie address> -q 64 -o 4096 -w randread -t 10
 
 ### Local filesystem
 
-The PC2 and C1 processes write files into the local filesystem (`/var/tmp/supra_seal`). For best performance this should be a dedicated disk, ideally a separate disk from where the parent cache is stored so that writing during PC2 does not impact read performance during PC1. The simplest way is to symlink `/var/tmp/supra_seal` to the desired location, but those paths can also be adjusted in `src/demos/main.cpp` and `src/demos/rust/main.rs`.
+The PC2 and C1 processes write files into the local filesystem (`/var/tmp/supra_seal`). For best performance this should be a dedicated disk, ideally a separate disk from where the parent cache is stored so that writing during PC2 does not impact read performance during PC1. The simplest way is to symlink `/var/tmp/supra_seal` to the desired location, but those paths can also be adjusted in `demos/main.cpp` and `demos/rust/main.rs`.
 
 # Running
 
 There are both Rust and c++ based demos that will perform PC1, PC2, and C1 on multiple pipelines. They both demonstrate concurrent PC1/PC2/C1 processes along the lines of the flowchart below. The main constraints exist around PC1 and PC2, which respectively utilize the CPU core and GPU(s) heavily so care must be taken to stage them for best performance. For example two PC1's or two PC2's should not typically be run concurrently. 
 
 ```mermaid
-flowchart TD
-
-    subgraph Pipeline B
-        B0(PC1) --> B1(PC2)
-        B1 --> B2(C1)
-    end
-    subgraph Pipeline A
-        A0(PC1) --> A1(PC2)
-        A1 --> A2(C1)
-    end
-   
-    A0 -->|await completion|B0
-    A1 -->|await completion|B1
+---
+displayMode: compact
+---
+gantt
+    title Sealing Pipeline
+    dateFormat  HH-mm
+    axisFormat %Hh%M
+    section Hashing Cores
+    PipeA Slot0 PC1:a1, 00-00, 3.5h
+    PipeB Slot1 PC1:b1, after a1 , 3.5h
+    PipeC Slot0 PC1:c1, after b1 , 3.5h
+    PipeD Slot1 PC1:d1, after c1 , 3.5h
+    section GPU
+    PipeA Slot0 PC2 :a2, after a1, 1.5h
+    PipeB Slot1 PC2 :b2, after b1, 1.5h
+    PipeA Slot0 C2 :a4, after b2, 2.0h
+    PipeC Slot0 PC2 :c2, after c1, 1.5h
+    PipeB Slot1 C2 :b4, after c2, 2.0h
+    section Filesystem
+    PipeA Slot0 Write: a5, after a2, 2.0h
+    PipeA Slot0 Wait :a3, after a2, 1.25h
+    PipeA Slot0 Clear: a6, after a3, 0.75h
+    PipeB Slot1 Write: b5, after b2, 2.0h
+    PipeB Slot1 Wait :b3, after b2, 1.25h
+    PipeB Slot1 Clear: b6, after b3, 0.75h
+    PipeC Slot0 Write: c5, after c2, 2.0h
+    PipeC Slot0 Wait :c3, after c2, 1.25h
+    PipeC Slot0 Clear: c6, after c3, 0.75h
 ```
 
 ```
@@ -295,5 +300,5 @@ flowchart TD
 
 # C++
 ./build.sh # Also called automatically by exec.sh
-sudo ./seal
+sudo ./bin/seal
 ```
