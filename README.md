@@ -186,6 +186,16 @@ We will specify a reference configuration with the final release of the software
 ### Install dependencies
 ```
 sudo apt install libconfig++-dev
+
+If gmp is not already installed:
+wget https://gmplib.org/download/gmp/gmp-6.2.1.tar.lz
+tar --lzip -xf gmp-6.2.1.tar.lz
+cd gmp-6.2.1/
+./configure --enable-cxx
+make -j2
+make check
+sudo make install
+cd ..
 ```
 
 ### Enable Huge Pages (1GB):
