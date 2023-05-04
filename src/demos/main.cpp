@@ -35,7 +35,7 @@ void demo_pipeline(size_t num_sectors, uint8_t* replica_ids) {
   size_t slot1 = get_slot_size(num_sectors) * 1;
   const char* parent_filename = get_parent_filename();
   const char* output_dir0 = "/var/tmp/supra_seal/0";
-  const char* output_dir1 = "/var/tmp/supra_seal/0";
+  const char* output_dir1 = "/var/tmp/supra_seal/1";
 
   printf("slot0 %08lx\n", slot0);
   printf("slot1 %08lx\n", slot1);
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
   uint64_t node_to_read = 0;
   uint64_t slot = 0;
   size_t   num_sectors = 64;
-  const char* output_dir = "/var/tmp/supra_seal";
+  const char* output_dir = "/var/tmp/supra_seal/0";
 
   enum { SEAL_MODE, READ_MODE, PARENTS_MODE, PIPELINE_MODE } mode = PIPELINE_MODE;
   bool perform_pc1 = false;

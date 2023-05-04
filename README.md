@@ -232,7 +232,7 @@ sudo env NRHUGE=128 ./scripts/setup.sh
 
 # Configuration
 
-The software is configured using the file `src/demos/rust/supra_seal.cfg`. This file contains the core topology used (assigning threads to cores) as well as the NVMe configuration. There is also a configuration `src/demos/rust/supra_seal_zen2.cfg` that assigns one hashing thread (2 sectors) per physical core rather than the default of 2 hashing threads per physical core intended for systems older than Zen3. The configuration file can be changed in `src/sealing/main.cpp` and `rust-demo/src/main.rs`.
+The software is configured using the file `src/demos/rust/supra_seal.cfg`. This file contains the core topology used (assigning threads to cores) as well as the NVMe configuration. There is also a configuration `src/demos/rust/supra_seal_zen2.cfg` that assigns one hashing thread (2 sectors) per physical core rather than the default of 2 hashing threads per physical core intended for systems older than Zen3. The configuration file can be changed in `src/demos/main.cpp` and `src/demos/rust/main.rs`.
 
 ### NVMe
 
@@ -257,7 +257,7 @@ build/examples/perf -b <disk pcie address> -q 64 -o 4096 -w randread -t 10
 
 ### Local filesystem
 
-The PC2 and C1 processes write files into the local filesystem (`/var/tmp/supra_seal`). For best performance this should be a dedicated disk, ideally a separate disk from where the parent cache is stored so that writing during PC2 does not impact read performance during PC1. The simplest way is to symlink `/var/tmp/supra_seal` to the desired location, but those paths can also be adjusted in `src/sealing/main.cpp` and `rust-demo/src/main.rs`.
+The PC2 and C1 processes write files into the local filesystem (`/var/tmp/supra_seal`). For best performance this should be a dedicated disk, ideally a separate disk from where the parent cache is stored so that writing during PC2 does not impact read performance during PC1. The simplest way is to symlink `/var/tmp/supra_seal` to the desired location, but those paths can also be adjusted in `src/demos/main.cpp` and `src/demos/rust/main.rs`.
 
 # Running
 
@@ -284,5 +284,6 @@ flowchart TD
 ./exec.sh
 
 # C++
+./build.sh # Also called automatically by exec.sh
 sudo ./seal
 ```
