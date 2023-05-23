@@ -114,9 +114,7 @@ fn main() {
     println!("cargo:rustc-link-arg=-lgcc");
 
     println!("cargo:rustc-link-lib=supraseal");
-    println!("cargo:rustc-link-lib=blst");
     println!("cargo:rustc-link-lib=gmp");
-    println!("cargo:rustc-link-lib=cudart");
     println!("cargo:rustc-link-lib=config++");
     println!("cargo:rustc-link-lib=static:-bundle=stdc++");
 

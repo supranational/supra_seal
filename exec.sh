@@ -18,7 +18,7 @@ fi
 cd demos/rust
 #touch build.rs
 env RUSTFLAGS="-C target-cpu=native" \
-    cargo build --release $SECTOR_SIZE_FEATURE
+    cargo +nightly build --release $SECTOR_SIZE_FEATURE
 sudo ./target/release/supra-seal-demo
 
 cd ../..

@@ -14,7 +14,7 @@ default = ["32GiB"]
 anyhow = "1.0.26"
 bincode = "1.1.2"
 filecoin-proofs-api = {version = "14.0.0", default-features = false }
-filecoin-proofs-v1 = { package = "filecoin-proofs", version = "~14.0.0", default-features = false, features = ["cuda"] }
+filecoin-proofs-v1 = { package = "filecoin-proofs", version = "~14.0.0", default-features = false }
 storage-proofs-core = { version = "~14.0.0", default-features = false }
 supraseal-c2 = { path = "../../c2/" }
 
