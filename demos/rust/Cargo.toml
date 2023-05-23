@@ -22,7 +22,3 @@ supraseal-c2 = { path = "../../c2/" }
 sha2 = { version = "0.10.2", features = ["compress", "asm"] }
 [target."cfg(not(target_arch = \"aarch64\"))".dependencies]
 sha2 = { version = "0.10.2", features = ["compress"] }
-
-[patch.crates-io]
-blst = { git = "https://github.com/supranational/blst" }
-bellperson = { path = "../../c2/bellperson/", version = "0.24.1"}
