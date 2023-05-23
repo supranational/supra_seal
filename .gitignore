@@ -1,13 +1,9 @@
-**/target
+/bin
 /c2/bellperson
 /deps
 /obj
+**/target
 *~
-/seal
 *.log
 *.swp
 *.lock
-/c1
-/tree_r
-/tree_r_cpu
-/bin
