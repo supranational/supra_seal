@@ -10,6 +10,7 @@ if [ "$1" == "512MiB" ]; then
     SECTOR_SIZE="-DSECTOR_SIZE_512MiB"
 fi
 
+CC=${CC:-cc}
 CXX=${CXX:-c++}
 NVCC=${NVCC:-nvcc}
 
@@ -18,7 +19,7 @@ SPDK="deps/spdk-v22.09"
 CUDA_ARCH="-arch=sm_80 -gencode arch=compute_70,code=sm_70"
 
 INCLUDE="-I$SPDK/include -I$SPDK/isa-l/.. -I$SPDK/dpdk/build/include"
-CFLAGS="$SECTOR_SIZE -O2 -g $INCLUDE -D__ADX__"
+CFLAGS="$SECTOR_SIZE -g -O2 $INCLUDE -D__ADX__"
 CPPFLAGS="$CFLAGS \
           -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter \
           -Wno-missing-field-initializers -fno-strict-aliasing \
@@ -135,7 +136,7 @@ if [ ! -d "c2/bellperson" ]; then
      git apply ../bellperson-0.24.1.patch)
 fi
 
-gcc -c sha/sha_ext_mbx2.S -o obj/sha_ext_mbx2.o
+$CC -c sha/sha_ext_mbx2.S -o obj/sha_ext_mbx2.o
 
 # Generate .h files for the Poseidon constants
 xxd -i poseidon/constants/constants_2  > obj/constants_2.h
@@ -157,7 +158,7 @@ $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage 
 $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
       -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dlink pc2/cuda/pc2.cu -o obj/pc2_link.o &
 
-$CXX -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
+$CXX -g -O2 -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
 
 $CXX $CPPFLAGS $INCLUDE -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
     -c sealing/supra_seal.cpp -o obj/supra_seal.o -Wno-subobject-linkage &
@@ -175,24 +176,26 @@ ar rvs obj/libsupraseal.a \
    obj/sha_ext_mbx2.o
 
 $CXX $CPPFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
-    -g -o bin/seal demos/main.cpp \
+    -o bin/seal demos/main.cpp \
     -Lobj -lsupraseal \
     $LDFLAGS -Ldeps/blst -lblst -L$CUDA/lib64 -lcudart_static -lgmp -lconfig++ &
 
-$CXX -DSECTOR_SIZE_512MiB -march=native -Wno-subobject-linkage \
+$CXX -DSECTOR_SIZE_512MiB -g -O3 -march=native \
+    -Wno-subobject-linkage \
     tools/c1.cpp sealing/sector_parameters.cpp util/debug_helpers.cpp \
     -o bin/c1 -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst -lgmp &
 
 # tree-r CPU only
-$CXX -g -Wall -Wextra -Werror -Wno-subobject-linkage -march=native -O3 \
+$CXX -g -O3 -march=native \
+    -Wall -Wextra -Werror -Wno-subobject-linkage \
     tools/tree_r.cpp \
     -o bin/tree_r_cpu -Iposeidon -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst &
 
 # tree-r CPU + GPU
 $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
-     -g -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
+     -g -O3 -Xcompiler -march=native \
+     -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
      -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
-     -Xcompiler -march=native -O3 \
      -x cu tools/tree_r.cpp -o bin/tree_r \
      -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++
 
