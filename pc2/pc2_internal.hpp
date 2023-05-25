@@ -19,4 +19,7 @@ void pc2_hash(SectorParameters& params, topology_t& topology,
               size_t _stream_count,
               const char** data_filenames, const char* output_dir);
 
+template<class C>
+void do_pc2_cleanup(SectorParameters& params, const char* output_dir);
+
 #endif

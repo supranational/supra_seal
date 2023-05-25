@@ -130,7 +130,7 @@ const size_t PAGE_BATCH_SIZE = PARENT_COUNT - 1;
 //  in the node buffer. The intention is the parents buffer is filled with
 //  values read from disk. The first parent is not required since it is the
 //  previous node and we know for sure it is in the node buffer.
-const size_t PARENT_BUFFER_BATCHES = 1<<19;
+const size_t PARENT_BUFFER_BATCHES = 1<<18;
 const size_t PARENT_BUFFER_NODES = PARENT_BUFFER_BATCHES * PAGE_BATCH_SIZE;
 
 // Number of hashing buffers allocated in memory.

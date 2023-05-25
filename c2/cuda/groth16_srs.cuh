@@ -236,7 +236,7 @@ private:
         std::atomic<size_t> ref_cnt;
         inline inner(const char* srs_path) : srs(srs_path), ref_cnt(1) {}
     };
-    inner* ptr;
+    inner* ptr = nullptr;
 
 public:
     SRS(const char* srs_path) { ptr = new inner(srs_path); }

@@ -19,15 +19,14 @@ class streaming_node_reader_t {
   std::atomic<bool> terminator;
   std::thread reader_thread;
 
-  // Allocate a single internal buffer that can be used when a single
-  // request is needed. Initially no space is allocated.
+  // Packed indicates nodes within a single layer will be contiguous
   bool packed;
   size_t num_slots;
   size_t pages_per_slot; 
   
 public:
   streaming_node_reader_t(nvme_controllers_t* _controllers, size_t qpair,
-                          size_t block_offset, int core_num);
+                          size_t block_offset, int core_num, size_t idle_sleep);
   
   ~streaming_node_reader_t();
 
@@ -40,6 +39,8 @@ public:
   // packed - indicates whether allocation should assume packed or unpacked node reads
   void alloc_slots(size_t N, size_t slot_node_count, bool _packed);
 
+  uint8_t* get_slot(size_t slot);
+  
   uint8_t* get_full_buffer(size_t &bytes);
 
   void free_slots();

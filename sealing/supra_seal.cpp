@@ -100,12 +100,22 @@ public:
     }
 
     print_parameters();
+    print_temps();
+  }
+
+  void print_temps() {
+    std::thread t = std::thread([this]() {
+      while (true) {
+        controllers->print_temperatures();
+        sleep(5 * 60);
+      }
+    });
+    t.detach();
   }
 };
 
 static sealing_ctx_t* sealing_ctx = nullptr;
 
-// TODO: cleanup / deallocate
 static std::mutex ctx_mtx;
 static void init_ctx() {
   std::unique_lock<std::mutex> lck(ctx_mtx);
@@ -140,35 +150,24 @@ int pc1(uint64_t block_offset, size_t num_sectors,
 }
 
 extern "C"
-int pc2(size_t block_offset, size_t num_sectors, const char* output_dir) {
+int pc2_cleanup(size_t num_sectors, const char* output_dir) {
+  SectorParameters params(SECTOR_SIZE);
+
+#define CALL_PC2_CLEANUP(C)                     \
+  do_pc2_cleanup<C>(params, output_dir);
+
+  SECTOR_CALL_TABLE(CALL_PC2_CLEANUP);
+#undef CALL_PC2_CLEANUP
+
+  return 0;
+}
+
+extern "C"
+int pc2(size_t block_offset, size_t num_sectors,
+        const char* output_dir, const char** data_filenames) {
   init_ctx();
 
   SectorParameters params(SECTOR_SIZE);
-
-  // TODO: pass in data file pointers
-  // For CC only, set data pointers to null
-  const char** data_filenames = nullptr;
-
-  // const char* data_filenames[num_sectors];
-  // for (size_t i = 0; i < num_sectors; i++) {
-  //   // TODO: cleanup
-  //   // sudo dd if=/dev/zero of=/var/tmp/supra_seal/data_files/data-file-512MB-000.dat bs=4096 count=131072
-  //   // sudo dd if=/dev/zero of=/var/tmp/supra_seal/data_files/data-file-32GB-000.dat bs=4096 count=8388608
-  //   // NOTE: random won't create correct labels since the top two bits won't be cleared
-  //   // sudo dd if=/dev/random of=/var/tmp/supra_seal/data_files/data-file-32GB-rand-000.dat bs=4096 count=8388608
-  //   if (SECTOR_SIZE_LG == SectorSizeLg::Sector512MB) {
-  //     data_filenames[i] = "/var/tmp/supra_seal/data_files/data-file-512MB-000.dat";
-  //   } else {
-  //     if (i == 0) {
-  //       data_filenames[i] = "/var/tmp/supra_seal/data_files/data-file-32GB-000.dat";
-  //     } else if (i < num_sectors / 4) {
-  //       data_filenames[i] = "/var/tmp/supra_seal/data_files/data-file-32GB-rand-000.dat";
-  //     } else {
-  //       data_filenames[i] = "/var/tmp/supra_seal/data_files/data-file-32GB-rand-000.dat";
-  //       //data_filenames[i] = nullptr;
-  //     }
-  //   }
-  // }
 
 #define CALL_PC2(C)                                   \
   do_pc2<C>(params, *sealing_ctx->topology,           \
@@ -195,7 +194,8 @@ int c1(size_t block_offset, size_t num_sectors, size_t sector_slot,
 #define CALL_C1(C) \
   { \
     streaming_node_reader_t<C> reader(sealing_ctx->controllers, qpair, \
-                                      block_offset, node_reader_core); \
+                                      block_offset, node_reader_core,   \
+                                      sealing_ctx->topology->c1_sleep_time); \
     return do_c1<C>(params, reader,                                    \
                     num_sectors, sector_slot,                          \
                     replica_id, seed,                                  \
@@ -291,6 +291,9 @@ size_t get_slot_size(size_t num_sectors) {
     break;
   case 2:
     pages_per_layer = sealing_config2_t::PAGES_PER_LAYER;
+    break;
+  case 1:
+    pages_per_layer = sealing_config1_t::PAGES_PER_LAYER;
     break;
   default:
     printf("Unsupported number of sectors %ld\n", num_sectors);

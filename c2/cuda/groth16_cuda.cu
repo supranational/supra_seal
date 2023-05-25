@@ -3,6 +3,8 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <mutex>
+#include <algorithm>
 
 #if defined(FEATURE_BLS12_381)
 # include <ff/bls12-381-fp2.hpp>
@@ -63,6 +65,9 @@ struct groth16_proof {
 
 #ifndef __CUDA_ARCH__
 
+// Mutex to control access to the GPUs
+static std::mutex gpu_mtx;
+
 #include "groth16_srs.cuh"
 
 #if defined(_MSC_VER) && !defined(__clang__) && !defined(__builtin_popcountll)
@@ -74,6 +79,8 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
     const msm_l_a_b_g1_b_g2_inputs_c& msm_l_a_b_g1_b_g2_inputs, size_t num_circuits,
     const fr_t r_s[], const fr_t s_s[], groth16_proof proofs[], SRS& srs)
 {
+    std::unique_lock<std::mutex> lock(gpu_mtx);
+
     const verifying_key* vk = &srs.get_vk();
 
     ntt_msm_h_inputs.points_h = srs.get_h().data();

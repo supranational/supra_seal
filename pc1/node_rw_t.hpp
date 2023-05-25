@@ -104,7 +104,7 @@ private:
 
 public:
   // Process IO requests
-  int process() {
+  int process(size_t idle_sleep = 0, size_t duty_cycle = 0) {
     // Reset stats
     ios_issued = 0;
     ios_completed = 0;
@@ -122,6 +122,8 @@ public:
       total_counters[ctrl_id] = 0;
     }
 
+    size_t iter_count = 0;
+      
     // Run
     while (!terminator) {
       // Track whether we are able to do any work
@@ -195,10 +197,18 @@ public:
       }
 
       // Process completions
+      size_t ios_completed_now = 0;
       for (size_t ctrl_id = 0; ctrl_id < controllers.size(); ctrl_id++) {
-        ios_completed += controllers[ctrl_id].process_completions(qpair_id);
+        ios_completed_now += controllers[ctrl_id].process_completions(qpair_id);
       }
-      
+      ios_completed += ios_completed_now;
+
+      if ((!dequed_any && ios_completed_now == 0 && idle_sleep > 0) ||
+          iter_count == duty_cycle) {
+        usleep(idle_sleep);
+        iter_count = 0;
+      }
+      iter_count++;
     }
     for (size_t ctrl_id = 0; ctrl_id < controllers.size(); ctrl_id++) {
       ios_completed += controllers[ctrl_id].process_all_completions(qpair_id);

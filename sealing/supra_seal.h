@@ -16,8 +16,16 @@ int pc1(uint64_t block_offset, size_t num_sectors,
         const uint8_t* replica_ids, const char* parents_filename);
 
 // Perform pc2 for layers stored starting at block_offset.
-int pc2(size_t block_offset, size_t num_sectors, const char* output_dir);
+// 'data_filenames' may be NULL for all CC sectors, or point to
+// an array of length 'num_sectors' of pointers to filenames.
+// Any element in the array may be NULL for CC or contain a path
+// to a data file.
+int pc2(size_t block_offset, size_t num_sectors,
+        const char* output_dir, const char** data_filenames);
 
+// Delete files associated with pc2
+int pc2_cleanup(size_t num_sectors, const char* output_dir);
+  
 int c1(size_t block_offset,size_t num_sectors, size_t sector_slot,
        const uint8_t* replica_id, const uint8_t* seed,
        const uint8_t* ticket, const char* cache_path,

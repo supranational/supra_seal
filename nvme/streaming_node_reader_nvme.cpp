@@ -25,21 +25,21 @@ struct streaming_node_reader_opaque_t {
 
 template<class C> streaming_node_reader_t<C>::
 streaming_node_reader_t(nvme_controllers_t* _controllers, size_t qpair,
-                        size_t block_offset, int core_num)
+                        size_t block_offset, int core_num, size_t idle_sleep)
   : controllers(_controllers), terminator(false)
   {
     num_slots = 0;
     opaque = new streaming_node_reader_opaque_t<C>();
     
     // Streaming reads
-    SPDK_ASSERT(opaque->node_read_fifo.create("node_read_fifo", nvme_controller_t::queue_size));
+    SPDK_ASSERT(opaque->node_read_fifo.create("node_read_fifo", 4 * nvme_controller_t::queue_size));
     opaque->node_reader = new node_rw_t<C, node_io_batch_t>
       (terminator, *controllers, opaque->node_read_fifo,
        qpair, block_offset);
 
-    reader_thread = std::thread([&, core_num]() {
+    reader_thread = std::thread([&, core_num, idle_sleep]() {
       set_core_affinity(core_num);
-      assert(opaque->node_reader->process() == 0);
+      assert(opaque->node_reader->process(idle_sleep) == 0);
     });    
   }
   
@@ -83,6 +83,11 @@ get_full_buffer(size_t &bytes) {
 }
 
 template<class C> uint8_t* streaming_node_reader_t<C>::
+get_slot(size_t slot) {
+  return (uint8_t*)&opaque->local_buffer[slot * pages_per_slot];
+}
+
+template<class C> uint8_t* streaming_node_reader_t<C>::
 load_layers(size_t slot, uint32_t layer, uint64_t node,
             size_t node_count, size_t num_layers,
             std::atomic<uint64_t>* valid, size_t* valid_count) {
@@ -93,31 +98,25 @@ load_layers(size_t slot, uint32_t layer, uint64_t node,
       
   size_t total_pages = num_layers * node_count / C::NODES_PER_PAGE;
   assert (total_pages <= pages_per_slot);
-    
-  size_t node_read_fifo_free;
-  while (true) {
-    node_read_fifo_free = opaque->node_read_fifo.free_count();
-    if (node_read_fifo_free >= total_pages) {
-      break;
-    }
-  }
 
   // Valid counter
   valid->store(0);
 
   node_id_t node_to_read(layer, node);
-  //assert (node_to_read.layer() == 0);
 
   size_t idx = 0;
   uint32_t cur_layer = layer;
   for (size_t i = 0; i < num_layers; i++) {
+    while (opaque->node_read_fifo.free_count() < node_count) {
+      usleep(100);
+    }
     for (size_t j = 0; j < node_count; j += C::NODES_PER_PAGE) {
       node_io_t& io = node_ios[idx].batch[0];
       io.type = node_io_t::type_e::READ;
       io.node = node_to_read;
       io.valid = valid;
       io.tracker.buf = (uint8_t*)&pages[idx];
-          
+
       SPDK_ASSERT(opaque->node_read_fifo.enqueue(&node_ios[idx]));
 
       node_to_read += C::NODES_PER_PAGE;
@@ -136,7 +135,6 @@ template<class C> int streaming_node_reader_t<C>::
 load_nodes(size_t slot, std::vector<std::pair<size_t, size_t>>& nodes) {
   assert (!packed);
   page_t<C>* pages = &opaque->local_buffer[slot * pages_per_slot];
-  //node_io_batch_t* node_ios = new node_io_batch_t[nodes.size()];
   node_io_batch_t* node_ios = &opaque->node_ios[slot * pages_per_slot];
 
   assert (nodes.size() <= pages_per_slot);
@@ -153,7 +151,6 @@ load_nodes(size_t slot, std::vector<std::pair<size_t, size_t>>& nodes) {
     }      
   }
   while (valid < nodes.size()) {}
-  //delete [] node_ios;
   return 0;
 }
 

@@ -7,8 +7,9 @@
 // care about freeing it.
 template<typename T> class host_ptr_t {
   T* h_ptr;
+  size_t nelems;
 public:
-  host_ptr_t(size_t nelems) : h_ptr(nullptr)
+  host_ptr_t(size_t _nelems) : h_ptr(nullptr), nelems(_nelems)
   {
     if (nelems) {
       CUDA_OK(cudaMallocHost(&h_ptr, nelems * sizeof(T)));
@@ -16,6 +17,7 @@ public:
   }
   ~host_ptr_t() { if (h_ptr) cudaFreeHost((void*)h_ptr); }
 
+  size_t size() { return nelems; }
   inline operator const T*() const            { return h_ptr; }
   inline operator T*() const                  { return h_ptr; }
   inline operator void*() const               { return (void*)h_ptr; }

@@ -224,8 +224,6 @@ void poseidon_hash_1_0(in_ptrs_d<ARITY_DT - 1> in_ptrs, fr_t* aux_ptr, const fr_
       // ie, two consecutive elements at a time. This pattern is repeated many times
       // based on batch size.
 
-      // TODO: cleanup
-      //int elements_per_hash_per_ptr = num_hashes / ARITY / ARITY;
       int elements_per_hash_per_ptr = num_hashes / stride;
       int element_idx = hash_num * (ARITY_DT - 1) + (hash_input - 1);
       int element_batch_idx = element_idx / elements_per_hash_per_ptr;
@@ -233,21 +231,6 @@ void poseidon_hash_1_0(in_ptrs_d<ARITY_DT - 1> in_ptrs, fr_t* aux_ptr, const fr_
       int ptr_num = element_batch_idx % ARITY;
       int ptr_idx = element_idx / (ARITY * elements_per_hash_per_ptr) * elements_per_hash_per_ptr + element_batch_off;
       element = in_ptrs.ptrs[ptr_num][ptr_idx];
-      // TODO: cleanup
-      // if (tid == 1) {
-      //   printf("num_hashes %d, stride %d, num_batches %d, node %d, sector %d\n",
-      //          num_hashes, stride, num_batches, node, sector);
-      //   printf("elements_per_hash_per_ptr %d, element_idx %d, element_batch_idx %d, element_batch_off %d, ptr_num %d, ptr_idx %d\n",
-      //          elements_per_hash_per_ptr,
-      //          element_idx,
-      //          element_batch_idx,
-      //          element_batch_off,
-      //          ptr_num,
-      //          ptr_idx);
-      // }
-      // if (hash_num == 0) {
-      //   printf("tid %d, input %08x\n", tid, ((uint32_t*)&element)[0]);
-      // }
     } else {
       fr_t* in_ptr = in_ptrs.ptrs[0];
       if (first_tree_r || first_tree_c) {

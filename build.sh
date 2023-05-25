@@ -199,7 +199,23 @@ $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
      -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
      -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
      -x cu tools/tree_r.cpp -o bin/tree_r \
-     -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++
+     -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
+
+# Standalone GPU pc2
+$NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
+     -g -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
+     -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
+     -Xcompiler -march=native -O3 \
+     -x cu tools/tree_r.cpp -o bin/tree_r \
+     -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
+
+# Standalone GPU pc2
+$NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
+     -g -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
+     -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
+     -Xcompiler -march=native -O3 \
+     -x cu tools/pc2.cu -o bin/pc2 \
+     -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
 
 wait
 

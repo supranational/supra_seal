@@ -13,8 +13,6 @@ public:
     sector_size = spdk_nvme_ns_get_sector_size(ns);
   }
 
-  // TODO: cleanup
-
   struct spdk_nvme_ns* get_ns() {
     return ns;
   }

@@ -39,143 +39,18 @@ pc2_t<C>::pc2_t(SectorParameters& _params, topology_t& _topology,
   tree_r_partition_roots(C::PARALLEL_SECTORS * TREE_ARITY),
   gpu_results_c(tree_r_only ? 0 :_batch_size * C::PARALLEL_SECTORS / TREE_ARITY * stream_count),
   gpu_results_r(_batch_size * C::PARALLEL_SECTORS / TREE_ARITY * stream_count),
-  host_buf_storage(num_host_bufs * batch_size * C::PARALLEL_SECTORS * 2),
+  host_buf_storage(num_host_bufs * batch_size * C::PARALLEL_SECTORS),
   data_filenames(_data_filenames),
   output_dir(_output_dir)
 {
   assert (TREE_ARITY == params.GetNumTreeRCArity());
   assert (nodes_to_read % stream_count == 0);
 
-  // Put layer11 / sealed file in a replicas directory if it exists
-  std::string pc2_replica_output_dir = output_dir;
-  pc2_replica_output_dir += "/replicas";
-  if (!std::filesystem::exists(pc2_replica_output_dir.c_str())) {
-    pc2_replica_output_dir = output_dir;
-  }
-
-  
-  if (C::PARALLEL_SECTORS == 1) {
-    p_aux_template = "%s/p_aux";
-  } else {
-    p_aux_template = "%s/%03ld/p_aux";
-  }
-  // Open all tree-c and tree-r files
-  const char* tree_c_filename_template;
-  const char* tree_r_filename_template;
-  if (C::PARALLEL_SECTORS == 1) {
-    if (params.GetNumTreeRCFiles() > 1) {
-      tree_c_filename_template = "%s/sc-02-data-tree-c-%ld.dat";
-      tree_r_filename_template = "%s/sc-02-data-tree-r-last-%ld.dat";
-    } else {
-      tree_c_filename_template = "%s/sc-02-data-tree-c.dat";
-      tree_r_filename_template = "%s/sc-02-data-tree-r-last.dat";
-    }
-  } else {
-    if (params.GetNumTreeRCFiles() > 1) {
-      tree_c_filename_template = "%s/%03ld/sc-02-data-tree-c-%ld.dat";
-      tree_r_filename_template = "%s/%03ld/sc-02-data-tree-r-last-%ld.dat";
-    } else {
-      tree_c_filename_template = "%s/%03ld/sc-02-data-tree-c.dat";
-      tree_r_filename_template = "%s/%03ld/sc-02-data-tree-r-last.dat";
-    }
-  }
-  // And sealed files
-  const char* sealed_filename_template = "%s/%03ld/sealed-file";
-  const char* layer11_filename_template = "%s/%03ld/layer11-file";
-
-  if (!std::filesystem::exists(output_dir)) {
-    std::filesystem::create_directory(output_dir);
-  }
-  has_cc_sectors = false;
-  has_non_cc_sectors = false;
-  
-  const size_t MAX = 256;
-  char fname[MAX];
-  for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-    // Create sector subdirs
-    if (C::PARALLEL_SECTORS == 1) {
-      snprintf(fname, MAX, "%s", output_dir);
-    } else {
-      snprintf(fname, MAX, "%s/%03ld", output_dir, i);
-    }
-    if (!std::filesystem::exists(fname)) {
-      std::filesystem::create_directory(fname);
-    }
-    if (!tree_r_only) {
-      if (C::PARALLEL_SECTORS == 1) {
-        snprintf(fname, MAX, "%s", pc2_replica_output_dir.c_str());
-      } else {
-        snprintf(fname, MAX, "%s/%03ld", pc2_replica_output_dir.c_str(), i);
-      }
-      if (!std::filesystem::exists(fname)) {
-        std::filesystem::create_directory(fname);
-      }
-    }
-
-    if (!tree_r_only) {
-      tree_c_files[i].resize(params.GetNumTreeRCFiles());
-    }
-    tree_r_files[i].resize(params.GetNumTreeRCFiles());
-    for (size_t j = 0; j < params.GetNumTreeRCFiles(); j++) {
-      // tree-c
-      if (!tree_r_only) {
-        if (C::PARALLEL_SECTORS == 1) {
-          if (params.GetNumTreeRCFiles() > 1) {
-            snprintf(fname, MAX, tree_c_filename_template, output_dir, j);
-          } else {
-            snprintf(fname, MAX, tree_c_filename_template, output_dir);
-          }
-        } else {
-          if (params.GetNumTreeRCFiles() > 1) {
-            snprintf(fname, MAX, tree_c_filename_template, output_dir, i, j);
-          } else {
-            snprintf(fname, MAX, tree_c_filename_template, output_dir, i);
-          }
-        }
-        assert(tree_c_files[i][j].mmap_write(fname, tree_c_address.data_size(), true) == 0);
-        tree_c_files[i][j].advise_random();
-      }
-                            
-      // tree-r
-      if (C::PARALLEL_SECTORS == 1) {
-        if (params.GetNumTreeRCFiles() > 1) {
-          snprintf(fname, MAX, tree_r_filename_template, output_dir, j);
-        } else {
-          snprintf(fname, MAX, tree_r_filename_template, output_dir);
-        }
-      } else {
-        if (params.GetNumTreeRCFiles() > 1) {
-          snprintf(fname, MAX, tree_r_filename_template, output_dir, i, j);
-        } else {
-          snprintf(fname, MAX, tree_r_filename_template, output_dir, i);
-        }
-      }
-      assert(tree_r_files[i][j].mmap_write(fname, tree_r_address.data_size(), true) == 0);
-      tree_r_files[i][j].advise_random();
-    }
-
-    // Data files for encoding
-    if (!tree_r_only) {
-      if (data_filenames != nullptr && data_filenames[i] != nullptr) {
-        data_files[i].mmap_read(data_filenames[i], SECTOR_SIZE);
-        // If there is a data file present we will encode layer 11 and write the
-        // sealed data
-        snprintf(fname, MAX, sealed_filename_template, pc2_replica_output_dir.c_str(), i);
-        assert(sealed_files[i].mmap_write(fname, SECTOR_SIZE, true) == 0);
-        has_non_cc_sectors = true;
-      } else {
-        // Write the raw layer 11 data
-        // TODO: no way to differentiate cc vs remote data
-        //snprintf(fname, MAX, layer11_filename_template, pc2_replica_output_dir.c_str(), i);
-        snprintf(fname, MAX, sealed_filename_template, pc2_replica_output_dir.c_str(), i);
-        assert(sealed_files[i].mmap_write(fname, SECTOR_SIZE, true) == 0);
-        has_cc_sectors = true;
-      }
-    }
-  }
+  open_files();
   
   // Compute the final offset in the file for GPU data
-  tree_address_t final_tree(batch_size, TREE_ARITY, sizeof(fr_t), 0);
+  const size_t cpu_nodes_to_hash = batch_size * stream_count / TREE_ARITY / TREE_ARITY;
+  tree_address_t final_tree(cpu_nodes_to_hash, TREE_ARITY, sizeof(fr_t), 0);
   final_gpu_offset_c = tree_c_address.data_size() - final_tree.data_size();
   final_gpu_offset_r = tree_r_address.data_size() - final_tree.data_size();
 
@@ -212,30 +87,32 @@ pc2_t<C>::pc2_t(SectorParameters& _params, topology_t& _topology,
     }
   }
 
-  // Register the page buffer with the CUDA driver
+  // Register the SPDK page buffer with the CUDA driver
   size_t page_buffer_size = 0;
-  page_buffer = reader.get_full_buffer(page_buffer_size);
+  page_buffer = (uint8_t*)reader.get_full_buffer(page_buffer_size);
   cudaHostRegister(page_buffer, page_buffer_size, cudaHostRegisterDefault);
 
   // Set up host side buffers for returning data
-  host_bufs0.resize(num_host_bufs);
-  host_buf_pool0.create(num_host_bufs);
-  host_buf_to_disk0.create(num_host_bufs);
-
-  if (!tree_r_only) {
-    host_bufs1.resize(num_host_bufs);
-    host_buf_pool1.create(num_host_bufs);
-    host_buf_to_disk1.create(num_host_bufs);
-  }
-  for (size_t i = 0; i < num_host_bufs; i++) {
-    host_bufs0[i].data = &host_buf_storage[i * batch_size * C::PARALLEL_SECTORS];
-    host_buf_pool0.enqueue(&host_bufs0[i]);
-    
-    if (!tree_r_only) {
-      host_bufs1[i].data = &host_buf_storage[num_host_bufs * batch_size * C::PARALLEL_SECTORS +
-                                             i * batch_size * C::PARALLEL_SECTORS];
-      host_buf_pool1.enqueue(&host_bufs1[i]);
+  host_bufs.resize(num_host_batches * disk_io_batch_size);
+  host_batches.resize(num_host_batches + num_host_empty_batches);
+  host_buf_pool_full.create(num_host_batches + num_host_empty_batches);
+  host_buf_pool_empty.create(num_host_batches + num_host_empty_batches);
+  host_buf_to_disk.create(num_host_batches + num_host_empty_batches);
+  
+  for (size_t i = 0; i < num_host_batches; i++) {
+    for (size_t j = 0; j < disk_io_batch_size; j++) {
+      host_batches[i].batch[j] = &host_bufs[i * disk_io_batch_size + j];
+      host_batches[i].batch[j]->data =
+        &host_buf_storage[i * disk_io_batch_size * batch_size * C::PARALLEL_SECTORS +
+                          j * batch_size * C::PARALLEL_SECTORS];
     }
+    host_buf_pool_full.enqueue(&host_batches[i]);
+  }
+  for (size_t i = 0; i < num_host_empty_batches; i++) {
+    for (size_t j = 0; j < disk_io_batch_size; j++) {
+      host_batches[i + num_host_batches].batch[j] = nullptr;
+    }
+    host_buf_pool_empty.enqueue(&host_batches[i + num_host_batches]);
   }
 }
 
@@ -254,22 +131,242 @@ pc2_t<C>::~pc2_t() {
     }
     delete poseidon_trees[i];
   }
+  for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+    for (size_t j = 0; j < params.GetNumTreeRCFiles(); j++) {
+      delete tree_c_files[i][j];
+      delete tree_r_files[i][j];
+    }
+  }
   cudaHostUnregister(page_buffer);
+}
+template<class C>
+void pc2_t<C>::get_filenames(SectorParameters& params, const char* output_dir,
+                             std::vector<std::string>& directories,
+                             std::vector<std::string>& p_aux_filenames,
+                             std::vector<std::vector<std::string>>& tree_c_filenames,
+                             std::vector<std::vector<std::string>>& tree_r_filenames,
+                             std::vector<std::string>& sealed_filenames) {
+  // Put layer11 / sealed file in a replicas directory if it exists
+  std::string pc2_replica_output_dir = output_dir;
+  pc2_replica_output_dir += "/replicas";
+  if (!std::filesystem::exists(pc2_replica_output_dir.c_str())) {
+    pc2_replica_output_dir = output_dir;
+  }
+
+  const char* p_aux_template;
+  if (C::PARALLEL_SECTORS == 1) {
+    p_aux_template = "%s/p_aux";
+  } else {
+    p_aux_template = "%s/%03ld/p_aux";
+  }
+  // Open all tree-c and tree-r files
+  const char* tree_c_filename_template;
+  const char* tree_r_filename_template;
+  if (C::PARALLEL_SECTORS == 1) {
+    if (params.GetNumTreeRCFiles() > 1) {
+      tree_c_filename_template = "%s/sc-02-data-tree-c-%ld.dat";
+      tree_r_filename_template = "%s/sc-02-data-tree-r-last-%ld.dat";
+    } else {
+      tree_c_filename_template = "%s/sc-02-data-tree-c.dat";
+      tree_r_filename_template = "%s/sc-02-data-tree-r-last.dat";
+    }
+  } else {
+    if (params.GetNumTreeRCFiles() > 1) {
+      tree_c_filename_template = "%s/%03ld/sc-02-data-tree-c-%ld.dat";
+      tree_r_filename_template = "%s/%03ld/sc-02-data-tree-r-last-%ld.dat";
+    } else {
+      tree_c_filename_template = "%s/%03ld/sc-02-data-tree-c.dat";
+      tree_r_filename_template = "%s/%03ld/sc-02-data-tree-r-last.dat";
+    }
+  }
+  // And sealed files
+  const char* sealed_filename_template;
+  if (C::PARALLEL_SECTORS == 1) {
+    sealed_filename_template = "%s/sealed-file";
+  } else {
+    sealed_filename_template = "%s/%03ld/sealed-file";
+  }
+
+  directories.push_back(output_dir);
+
+  tree_c_filenames.resize(C::PARALLEL_SECTORS);
+  tree_r_filenames.resize(C::PARALLEL_SECTORS);
+  
+  const size_t MAX = 256;
+  char fname[MAX];
+  for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+    // Create sector subdirs
+    if (C::PARALLEL_SECTORS == 1) {
+      snprintf(fname, MAX, "%s", output_dir);
+    } else {
+      snprintf(fname, MAX, "%s/%03ld", output_dir, i);
+    }
+    directories.push_back(fname);
+
+    if (C::PARALLEL_SECTORS == 1) {
+      snprintf(fname, MAX, p_aux_template, output_dir);
+    } else {
+      snprintf(fname, MAX, p_aux_template, output_dir, i);
+    }
+    p_aux_filenames.push_back(fname);
+
+    if (C::PARALLEL_SECTORS == 1) {
+      snprintf(fname, MAX, "%s", pc2_replica_output_dir.c_str());
+    } else {
+      snprintf(fname, MAX, "%s/%03ld", pc2_replica_output_dir.c_str(), i);
+    }
+    directories.push_back(fname);
+
+    for (size_t j = 0; j < params.GetNumTreeRCFiles(); j++) {
+      // tree-c
+      if (C::PARALLEL_SECTORS == 1) {
+        if (params.GetNumTreeRCFiles() > 1) {
+          snprintf(fname, MAX, tree_c_filename_template, output_dir, j);
+        } else {
+          snprintf(fname, MAX, tree_c_filename_template, output_dir);
+        }
+      } else {
+        if (params.GetNumTreeRCFiles() > 1) {
+          snprintf(fname, MAX, tree_c_filename_template, output_dir, i, j);
+        } else {
+          snprintf(fname, MAX, tree_c_filename_template, output_dir, i);
+        }
+      }
+      tree_c_filenames[i].push_back(fname);
+                            
+      // tree-r
+      if (C::PARALLEL_SECTORS == 1) {
+        if (params.GetNumTreeRCFiles() > 1) {
+          snprintf(fname, MAX, tree_r_filename_template, output_dir, j);
+        } else {
+          snprintf(fname, MAX, tree_r_filename_template, output_dir);
+        }
+      } else {
+        if (params.GetNumTreeRCFiles() > 1) {
+          snprintf(fname, MAX, tree_r_filename_template, output_dir, i, j);
+        } else {
+          snprintf(fname, MAX, tree_r_filename_template, output_dir, i);
+        }
+      }
+      tree_r_filenames[i].push_back(fname);
+    }
+
+    // Data files for encoding
+    if (C::PARALLEL_SECTORS == 1) {
+      snprintf(fname, MAX, sealed_filename_template, pc2_replica_output_dir.c_str());
+   } else {
+      snprintf(fname, MAX, sealed_filename_template, pc2_replica_output_dir.c_str(), i);
+    }
+    sealed_filenames.push_back(fname);
+  }
+}
+
+// TODO SNP: Use get_filenames
+template<class C>
+void pc2_t<C>::open_files() {
+  std::vector<std::string> directories;
+  std::vector<std::vector<std::string>> tree_c_filenames;
+  std::vector<std::vector<std::string>> tree_r_filenames;
+  std::vector<std::string> sealed_filenames;
+  
+  get_filenames(params, output_dir,
+                directories,
+                p_aux_filenames,
+                tree_c_filenames,
+                tree_r_filenames,
+                sealed_filenames);
+
+  for (auto it : directories) {  
+    if (!std::filesystem::exists(it)) {
+      std::filesystem::create_directory(it);
+    }
+  }
+  has_cc_sectors = false;
+  has_non_cc_sectors = false;
+
+  size_t num_tree_files = params.GetNumTreeRCFiles();
+  for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+    if (!tree_r_only) {
+      tree_c_files[i].resize(num_tree_files);
+    }
+    tree_r_files[i].resize(num_tree_files);
+    for (size_t j = 0; j < num_tree_files; j++) {
+      // tree-c
+      if (!tree_r_only) {
+        tree_c_files[i][j] = new file_writer_t<fr_t>();
+        assert(tree_c_files[i][j]->open(tree_c_filenames[i][j],
+                                        tree_c_address.data_size(), true, false) == 0);
+        tree_c_files[i][j]->advise_random();
+      } else {
+        tree_c_files[i][j] = nullptr;
+      }
+                            
+      // tree-r
+      tree_r_files[i][j] = new file_writer_t<fr_t>();
+      assert(tree_r_files[i][j]->open(tree_r_filenames[i][j],
+                                      tree_r_address.data_size(), true, false) == 0);
+      tree_r_files[i][j]->advise_random();
+    }
+
+    // Data files for encoding
+    if (!tree_r_only) {
+      if (data_filenames != nullptr && data_filenames[i] != nullptr) {
+        data_files[i].mmap_read(data_filenames[i], SECTOR_SIZE);
+        // If there is a data file present we will encode layer 11 and write the
+        // sealed data
+        assert(sealed_files[i].open(sealed_filenames[i], SECTOR_SIZE, true, false) == 0);
+        has_non_cc_sectors = true;
+      } else {
+        // Write the raw layer 11 data
+        // It would be nice to write different files for encoded vs not encoded data but in
+        // reality we can't differentiate between CC and sectors that will use remote data.
+        // So we write them all to 'sealed_data' here.
+        assert(sealed_files[i].open(sealed_filenames[i], SECTOR_SIZE, true, false) == 0);
+        has_cc_sectors = true;
+      }
+    }
+  }
 }
 
 template<class C>
 void pc2_t<C>::hash() {
+  thread_pool_t pool(1);
+  pool.spawn([&]() {
+    // Affinitize the thread in the pool
+    set_core_affinity(topology.pc2_hasher_cpu);
+  });
+
+  channel_t<int> ch;
+  ch.send(-1);
+
+  host_buffer_t cpu_input_c(gpu_results_c.size());
+  host_buffer_t cpu_input_r(gpu_results_r.size());
+  
   auto start = std::chrono::high_resolution_clock::now();
   for (size_t partition = 0; partition < params.GetNumTreeRCFiles(); partition++) {
     auto pstart_gpu = std::chrono::high_resolution_clock::now();
     hash_gpu(partition);
     auto pstop_gpu = std::chrono::high_resolution_clock::now();
-    if (!tree_r_only) {
-      hash_cpu(&tree_c_partition_roots[partition * C::PARALLEL_SECTORS],
-               partition, &(gpu_results_c[0]), tree_c_files, final_gpu_offset_c);
-    }
-    hash_cpu(&tree_r_partition_roots[partition * C::PARALLEL_SECTORS],
-             partition, &(gpu_results_r[0]), tree_r_files, final_gpu_offset_r);
+
+    gpu_results_in_use.lock();
+    ch.recv();
+    pool.spawn([&, partition]() {
+      // Protect against a race condition for gpu_results where if the CPU hashing
+      // is slow relative to the GPU the results could be overwritten before they are
+      // used. 
+      memcpy(&cpu_input_c[0], &gpu_results_c[0], gpu_results_c.size() * sizeof(fr_t));
+      memcpy(&cpu_input_r[0], &gpu_results_r[0], gpu_results_r.size() * sizeof(fr_t));
+
+      gpu_results_in_use.unlock();
+      
+      if (!tree_r_only) {
+        hash_cpu(&tree_c_partition_roots[partition * C::PARALLEL_SECTORS],
+                 partition, &(cpu_input_c[0]), tree_c_files, final_gpu_offset_c);
+      }
+      hash_cpu(&tree_r_partition_roots[partition * C::PARALLEL_SECTORS],
+               partition, &(cpu_input_r[0]), tree_r_files, final_gpu_offset_r);
+      ch.send(partition);
+    });
     auto pstop_cpu = std::chrono::high_resolution_clock::now();
     uint64_t secs_gpu = std::chrono::duration_cast<
       std::chrono::seconds>(pstop_gpu - pstart_gpu).count();
@@ -278,6 +375,7 @@ void pc2_t<C>::hash() {
     printf("Partition %ld took %ld seconds (gpu %ld, cpu %ld)\n",
            partition, secs_gpu + secs_cpu, secs_gpu, secs_cpu);
   }
+  ch.recv();
   write_roots(&tree_c_partition_roots[0], &tree_r_partition_roots[0]);
   auto stop = std::chrono::high_resolution_clock::now();
   uint64_t secs = std::chrono::duration_cast<
@@ -290,49 +388,171 @@ void pc2_t<C>::hash() {
 }
 
 template<class C>
-void pc2_t<C>::process_writes(int core,
-                              mt_fifo_t<buf_to_disk_t<C>>& to_disk_fifo,
-                              mt_fifo_t<buf_to_disk_t<C>>& pool,
+void pc2_t<C>::process_writes(int core, size_t max_write_size,
+                              mtx_fifo_t<buf_to_disk_batch_t>& to_disk_fifo,
+                              mtx_fifo_t<buf_to_disk_batch_t>& pool,
                               std::atomic<bool>& terminate,
                               std::atomic<int>& disk_writer_done) {
   set_core_affinity(core);
-  
+  fr_t* staging = new fr_t[max_write_size];
+
+  size_t count = 0;
   while(!terminate || to_disk_fifo.size() > 0) {
     if (pool.is_full()) {
       continue;
     }
 
-    buf_to_disk_t<C>* to_disk = to_disk_fifo.dequeue();
-    if (to_disk != nullptr) {
+    buf_to_disk_batch_t* to_disk_batch = to_disk_fifo.dequeue();
+    if (to_disk_batch != nullptr) {
 #ifndef DISABLE_FILE_WRITES
-      if (to_disk->stride == 1) {
-        // Copy chunks of contiguous data
-        for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-          if (to_disk->src[i] != nullptr) {
-            memcpy(to_disk->dst[i], to_disk->src[i], to_disk->size * sizeof(fr_t));
-          }
+      for (size_t batch_elmt = 0; batch_elmt < disk_io_batch_size; batch_elmt++) {
+        buf_to_disk_t<C>* to_disk = to_disk_batch->batch[batch_elmt];
+        if (to_disk == nullptr || to_disk->size == 0) {
+          continue;
         }
-      } else {
-        //  Copy strided src data
-        for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-          if (to_disk->src[i] != nullptr) {
-            for (size_t j = 0; j < to_disk->size; j++) {
-              fr_t elmt = to_disk->src[i][j * to_disk->stride];
-              if (to_disk->reverse) {
-                node_t* n = (node_t*)&elmt;
-                n->reverse_l();
+        // printf("Writing batch element %ld stride %ld size %ld %p\n",
+        //        batch_elmt, to_disk->stride, to_disk->size, to_disk->data);
+        if (to_disk->stride == 1) {
+          // Copy chunks of contiguous data
+          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+            if (to_disk->src[i] != nullptr) {
+              // printf("Writing from %p to %p offset %ld size %ld\n",
+              //        to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
+              to_disk->dst[i]->write_data(to_disk->offset, to_disk->src[i], to_disk->size);
+            }
+          }
+        } else {
+          //  Copy strided src data
+          assert (max_write_size <= to_disk->size);
+          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+            if (to_disk->src[i] != nullptr) {
+              for (size_t j = 0; j < to_disk->size; j++) {
+                staging[j] = to_disk->src[i][j * to_disk->stride];
+                if (to_disk->reverse) {
+                  node_t *n = (node_t*)&staging[j];
+                  n->reverse_l();
+                }
               }
-              to_disk->dst[i][j] = elmt;
+              to_disk->dst[i]->write_data(to_disk->offset, staging, to_disk->size);
             }
           }
         }
       }
 #endif
-      pool.enqueue(to_disk);
+      //      count++;
+      pool.enqueue(to_disk_batch);
     }
   }
-  disk_writer_done++;
+  delete [] staging;
+  disk_writer_done--;
 }
+
+template<class C>
+struct pc2_batcher_t {
+  typedef typename pc2_t<C>::buf_to_disk_batch_t buf_to_disk_batch_t;
+
+  buf_to_disk_batch_t* unbundle;
+  buf_to_disk_batch_t* bundle;
+  mtx_fifo_t<buf_to_disk_batch_t>& to_disk;
+  mtx_fifo_t<buf_to_disk_batch_t>& pool_full;
+  mtx_fifo_t<buf_to_disk_batch_t>& pool_empty;
+  size_t idx_unbundle;
+  size_t idx_bundle;
+  std::mutex mtx;
+
+  pc2_batcher_t(mtx_fifo_t<buf_to_disk_batch_t>& _pool_full,
+                mtx_fifo_t<buf_to_disk_batch_t>& _pool_empty,
+                mtx_fifo_t<buf_to_disk_batch_t>& _to_disk)
+    : pool_full(_pool_full), pool_empty(_pool_empty), to_disk(_to_disk)
+  {
+    unbundle = pool_full.dequeue();
+    bundle = pool_empty.dequeue();
+    assert (unbundle != nullptr);
+    assert (bundle != nullptr);
+    idx_unbundle = 0;
+    idx_bundle = 0;
+  }
+  
+  ~pc2_batcher_t() {
+    flush();
+  }
+
+  void flush() {
+    std::unique_lock<std::mutex> lock(mtx);
+    // Issue any partially bundles writes
+    assert (idx_bundle == idx_unbundle);
+    if (idx_bundle > 0) {
+      while (idx_bundle < buf_to_disk_batch_t::BATCH_SIZE) {
+        unbundle->batch[idx_unbundle]->size = 0;
+        bundle->batch[idx_bundle] = unbundle->batch[idx_unbundle++];
+        idx_bundle++;
+        idx_unbundle++;
+      }
+      to_disk.enqueue(bundle);
+      pool_empty.enqueue(unbundle);
+    } else {
+      // Untouched bundle/unbundle batches
+      if (bundle != nullptr) {
+        pool_empty.enqueue(bundle);
+      }
+      if (unbundle != nullptr) {
+        pool_full.enqueue(bundle);
+      }
+    }
+    bundle = nullptr;
+    unbundle = nullptr;
+    idx_unbundle = 0;
+    idx_bundle = 0;
+  }
+
+  buf_to_disk_t<C>* dequeue() {
+    std::unique_lock<std::mutex> lock(mtx);
+    if (unbundle == nullptr) {
+      unbundle = pool_full.dequeue();
+      if (unbundle == nullptr) {
+        return nullptr;
+      }
+    }
+    buf_to_disk_t<C>* buf = unbundle->batch[idx_unbundle++];
+    if (idx_unbundle == buf_to_disk_batch_t::BATCH_SIZE) {
+      pool_empty.enqueue(unbundle);
+      unbundle = nullptr;
+      idx_unbundle = 0;
+    }
+    return buf;
+  }
+
+  bool enqueue(buf_to_disk_t<C>* buf) {
+    std::unique_lock<std::mutex> lock(mtx);
+    if (bundle == nullptr) {
+      bundle = pool_empty.dequeue();
+      if (bundle == nullptr) {
+        //return false;
+        assert(false);
+      }
+    }
+    bundle->batch[idx_bundle++] = buf;
+    if (idx_bundle == buf_to_disk_batch_t::BATCH_SIZE) {
+      to_disk.enqueue(bundle);
+      bundle = nullptr;
+      idx_bundle = 0;
+    }
+    return true;
+  }
+
+  size_t size() {
+    std::unique_lock<std::mutex> lock(mtx);
+    return std::min
+      (// Available buffer slots to store data
+       (unbundle == nullptr ? 0 : (buf_to_disk_batch_t::BATCH_SIZE - idx_unbundle)) +
+       pool_full.size() * buf_to_disk_batch_t::BATCH_SIZE,
+
+                    // Available empty buffer slots
+       (bundle == nullptr ? 0 : (buf_to_disk_batch_t::BATCH_SIZE - idx_bundle)) +
+       pool_empty.size() * buf_to_disk_batch_t::BATCH_SIZE);
+  }
+};
+
 
 template<class C>
 void pc2_t<C>::hash_gpu(size_t partition) {
@@ -340,29 +560,23 @@ void pc2_t<C>::hash_gpu(size_t partition) {
 
   nodes_per_stream = nodes_to_read / stream_count;
 
-  thread_pool_t pool(2);
-
   for (size_t i = 0; i < resources.size(); i++) {
     resources[i]->reset();
   }
   
   // Start a thread to process writes to disk
   std::atomic<bool> terminate = false;
-  std::atomic<int> disk_writer_done(0);
-  // tree-c and tree-r
-  pool.spawn([this, &terminate, &disk_writer_done]() {
-    process_writes(this->topology.pc2_writer0,
-                   host_buf_to_disk0, host_buf_pool0,
-                   terminate, disk_writer_done);
-  });
-  // last layer / sealed file
-  if (!tree_r_only) {
-    pool.spawn([this, &terminate, &disk_writer_done]() {
-      process_writes(this->topology.pc2_writer1,
-                     host_buf_to_disk1, host_buf_pool1,
+  const size_t num_writers = (size_t)this->topology.pc2_writer_cores;
+  thread_pool_t pool(num_writers);
+  std::atomic<int> disk_writer_done(num_writers);
+  for (size_t i = 0; i < num_writers; i++) {
+    pool.spawn([this, &terminate, &disk_writer_done, i]() {
+      process_writes(this->topology.pc2_writer + i, batch_size,
+                     host_buf_to_disk, host_buf_pool_full,
                      terminate, disk_writer_done);
     });
   }
+  pc2_batcher_t<C> disk_batcher(host_buf_pool_full, host_buf_pool_empty, host_buf_to_disk);
   
   bool all_done = false;
   cuda_lambda_t cuda_notify(1);
@@ -371,8 +585,26 @@ void pc2_t<C>::hash_gpu(size_t partition) {
   buf_to_disk_t<C>* to_disk_r = nullptr;
   fr_t* fr = nullptr;
   size_t disk_bufs_needed = 0;
+
+  // printf("to_disk_fifo %ld, pool_full %ld, pool_empty %ld\n",
+  //        host_buf_to_disk.size(), host_buf_pool_full.size(), host_buf_pool_empty.size());
+
+  //size_t num_writes = 0;
   
+  // auto start = std::chrono::high_resolution_clock::now();
   while (!all_done) {
+    // auto now = std::chrono::high_resolution_clock::now();
+    // uint64_t secs = std::chrono::duration_cast<
+    //   std::chrono::seconds>(now - start).count();
+    // if (secs > 60) {
+    //   printf("to_disk_fifo %ld, pool_full %ld, pool_empty %ld\n",
+    //          host_buf_to_disk.size(), host_buf_pool_full.size(), host_buf_pool_empty.size());
+    //   for (size_t resource_num = 0; resource_num < resources.size(); resource_num++) {
+    //     printf("resource %ld state %d\n", resource_num, (int)resources[resource_num]->state);
+    //   }
+    //   start = now;
+    // }
+
     all_done = true;
     for (size_t resource_num = 0; resource_num < resources.size(); resource_num++) {
       gpu_resource_t<C>& resource = *resources[resource_num];
@@ -390,6 +622,7 @@ void pc2_t<C>::hash_gpu(size_t partition) {
       size_t offset_c;
       size_t offset_r;
       bool write_tree_r;
+      bool write_tree_c;
 
       // Device storage for the hash result
       if (resource.work_c.buf != nullptr) {
@@ -411,6 +644,7 @@ void pc2_t<C>::hash_gpu(size_t partition) {
         if (resource.work_c.is_leaf) {
 #ifdef DISABLE_FILE_READS
           resource.state = ResourceState::HASH_COLUMN;
+          resource.column_data = (fr_t*)reader.get_slot(resource.id);
 #else
           resource.state = ResourceState::DATA_READ;
 #endif
@@ -439,15 +673,13 @@ void pc2_t<C>::hash_gpu(size_t partition) {
       case ResourceState::DATA_WAIT:
         if (resource.valid.load() == resource.valid_count) {
           if (!tree_r_only) {
-            // Prepare to Write layer 11 / sealed data to disk          
-            if (host_buf_to_disk1.is_full()) {
+            if (disk_batcher.size() < 1) {
               break;
             }
-            to_disk = host_buf_pool1.dequeue();
-            if (to_disk == nullptr) {
-              break;
-            }
+            to_disk = disk_batcher.dequeue();
+            assert (to_disk != nullptr);
           }
+
           fr_t* encode_buf = &resource.replica_data[0];
           
           // Copy layer 11 data to to_disk buffer for encoding/writing
@@ -482,12 +714,15 @@ void pc2_t<C>::hash_gpu(size_t partition) {
             to_disk->size = batch_size;
             to_disk->stride = C::PARALLEL_SECTORS;
             to_disk->reverse = true;
+            to_disk->offset = resource.start_node;
             for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
               to_disk->src[i] = &to_disk->data[i];
-              to_disk->dst[i] = &sealed_files[i][resource.start_node];
-              if (data_files[i].is_open()) {
-              }
+              //to_disk->dst[i] = &sealed_files[i][resource.start_node];
+              to_disk->dst[i] = &sealed_files[i];
+              // printf("Initiate replica write from %p to %p offset %ld size %ld\n",
+              //        to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
             }
+            
             // Copy the encoded replica data into the disk buffer
             memcpy(&to_disk->data[0],
                    &resource.replica_data[0],
@@ -497,20 +732,18 @@ void pc2_t<C>::hash_gpu(size_t partition) {
           if (tree_r_only) {
             resource.state = ResourceState::HASH_COLUMN_LEAVES;
           } else {
-            host_buf_to_disk1.enqueue(to_disk);
+            assert(disk_batcher.enqueue(to_disk));
             resource.state = ResourceState::HASH_COLUMN;
           }
         }
         break;
       
       case ResourceState::HASH_COLUMN:
-        if (host_buf_to_disk0.is_full()) {
+        if (disk_batcher.size() < 1) {
           break;
         }
-        to_disk = host_buf_pool0.dequeue();
-        if (to_disk == nullptr) {
-          break;
-        }
+        to_disk = disk_batcher.dequeue();
+        assert (to_disk != nullptr);
         
         resource.stream.HtoD(&resource.column_data_d[0], resource.column_data, resource.batch_elements);
 
@@ -530,18 +763,23 @@ void pc2_t<C>::hash_gpu(size_t partition) {
         addr = node_id_t(resource.work_c.idx.layer() - 1,
                          resource.work_c.idx.node() * batch_size + layer_offset * resource_num);
         offset_c = tree_c_address.address(addr);
-
-        for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-          to_disk->dst[i] = (fr_t*)&tree_c_files[i][partition][offset_c];
-          to_disk->src[i] = &to_disk->data[i * batch_size];
-        }
         to_disk->size = batch_size;
         to_disk->stride = 1;
         to_disk->reverse = false;
-
+        to_disk->offset = offset_c / sizeof(fr_t);
+        for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+          //to_disk->dst[i] = (fr_t*)&tree_c_files[i][partition][offset_c];
+          to_disk->dst[i] = tree_c_files[i][partition];
+          to_disk->src[i] = &to_disk->data[i * batch_size];
+          // printf("Initiate column write[%ld] from %p to %p offset %ld size %ld\n",
+          //        i, to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
+        }
+        //num_writes++;
+        
         resources[resource_num]->async_done = false;
-        cuda_notify.schedule(resource.stream, [this, resource_num, to_disk, offset_c]() {
-          this->host_buf_to_disk0.enqueue(to_disk);
+        cuda_notify.schedule(resource.stream, [this, resource_num, offset_c,
+                                               to_disk, &disk_batcher]() {
+          assert(disk_batcher.enqueue(to_disk));
           resources[resource_num]->async_done = true;
         });
 
@@ -553,14 +791,12 @@ void pc2_t<C>::hash_gpu(size_t partition) {
           break;
         }
         if (!tree_r_only) {
-          if (host_buf_to_disk0.is_full()) {
+          if (disk_batcher.size() < 1) {
             break;
           }
-          to_disk = host_buf_pool0.dequeue();
-          if (to_disk == nullptr) {
-            break;
-          }
-
+          to_disk = disk_batcher.dequeue();
+          assert (to_disk != nullptr);
+          
           // Hash tree-c
           poseidon_trees[gpu_id]->hash_batch_device
             (out_c_d, out_c_d, &resource.aux_d[0],
@@ -596,19 +832,22 @@ void pc2_t<C>::hash_gpu(size_t partition) {
                            resource.work_c.idx.node() * batch_size / TREE_ARITY +
                            layer_offset * resource_num);
           offset_c = tree_c_address.address(addr);
-          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-            to_disk->dst[i] = (fr_t*)&tree_c_files[i][partition][offset_c];
-            to_disk->src[i] = &to_disk->data[i * batch_size / TREE_ARITY];
-          }
           to_disk->size = batch_size / TREE_ARITY;
           to_disk->stride = 1;
           to_disk->reverse = false;
+          to_disk->offset = offset_c / sizeof(fr_t);
+          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+            to_disk->dst[i] = tree_c_files[i][partition];
+            to_disk->src[i] = &to_disk->data[i * batch_size / TREE_ARITY];
+            // printf("Initiate column leaf write from %p to %p offset %ld size %ld\n",
+            //        to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
+          }
         }
         
         resources[resource_num]->async_done = false;
-        cuda_notify.schedule(resource.stream, [this, resource_num, to_disk]() {
+        cuda_notify.schedule(resource.stream, [this, resource_num, to_disk, &disk_batcher]() {
           if (!tree_r_only) {
-            this->host_buf_to_disk0.enqueue(to_disk);
+            assert (disk_batcher.enqueue(to_disk));
           }
           resources[resource_num]->async_done = true;
         });
@@ -617,22 +856,26 @@ void pc2_t<C>::hash_gpu(size_t partition) {
         break;
 
       case ResourceState::HASH_LEAF:
-        disk_bufs_needed = tree_r_only ? 1 : 2;
-        if (host_buf_to_disk0.free_count() < disk_bufs_needed) {
+        write_tree_c = true;
+        disk_bufs_needed = !tree_r_only + write_tree_c;
+        if (disk_batcher.size() < disk_bufs_needed) {
           break;
         }
-        if (host_buf_pool0.size() < disk_bufs_needed) {
+        if (resource.last && !gpu_results_in_use.try_lock()) {
           break;
         }
+        write_tree_c = true;
         if (!tree_r_only) {
-          to_disk = host_buf_pool0.dequeue();
-          assert (to_disk != nullptr);
-        
+          if (write_tree_c) {
+            to_disk = disk_batcher.dequeue();
+            assert (to_disk != nullptr);
+          }
+          
           // Hash tree-c
           for (size_t i = 0; i < TREE_ARITY; i++) {
             in_d.ptrs[i] = &(*resource.work_c.inputs[i])[0];
           }
-
+          
           poseidon_trees[gpu_id]->hash_batch_device_ptrs
             (out_c_d, in_d, &resource.aux_d[0],
              batch_size * C::PARALLEL_SECTORS / TREE_ARITY,
@@ -671,19 +914,23 @@ void pc2_t<C>::hash_gpu(size_t partition) {
                            resource.work_c.idx.node() * batch_size / TREE_ARITY +
                            layer_offset * resource_num);
           offset_c = tree_c_address.address(addr);
-          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-            to_disk->dst[i] = (fr_t*)&tree_c_files[i][partition][offset_c];
-            to_disk->src[i] = &to_disk->data[i * batch_size / TREE_ARITY];
-          }
           to_disk->size = batch_size / TREE_ARITY;
           to_disk->stride = 1;
           to_disk->reverse = false;
+          to_disk->offset = offset_c / sizeof(fr_t);
+          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+            //to_disk->dst[i] = (fr_t*)&tree_c_files[i][partition][offset_c];
+            to_disk->dst[i] = tree_c_files[i][partition];
+            to_disk->src[i] = &to_disk->data[i * batch_size / TREE_ARITY];
+            // printf("Initiate tree-c write from %p to %p offset %ld size %ld\n",
+            //        to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
+          }
         }
         
         // tree-r
         write_tree_r = resource.work_r.idx.layer() > params.GetNumTreeRDiscardRows();
         if (write_tree_r) {
-          to_disk_r = host_buf_pool0.dequeue();
+          to_disk_r = disk_batcher.dequeue();
           assert (to_disk_r != nullptr);
           resource.stream.DtoH(&to_disk_r->data[0], out_r_d,
                                batch_size * C::PARALLEL_SECTORS / TREE_ARITY);
@@ -702,24 +949,31 @@ void pc2_t<C>::hash_gpu(size_t partition) {
                            resource.work_r.idx.node() * batch_size / TREE_ARITY +
                            layer_offset * resource_num);
           offset_r = tree_r_address.address(addr);
-          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-            to_disk_r->dst[i] = (fr_t*)&tree_r_files[i][partition][offset_r];
-            to_disk_r->src[i] = &to_disk_r->data[i * batch_size / TREE_ARITY];
-          }
           to_disk_r->size = batch_size / TREE_ARITY;
           to_disk_r->stride = 1;
           to_disk_r->reverse = false;
+          to_disk_r->offset = offset_r / sizeof(fr_t);
+          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+            //to_disk_r->dst[i] = (fr_t*)&tree_r_files[i][partition][offset_r];
+            to_disk_r->dst[i] = tree_r_files[i][partition];
+            to_disk_r->src[i] = &to_disk_r->data[i * batch_size / TREE_ARITY];
+            // printf("Initiate tree-r write from %p to %p offset %ld size %ld\n",
+            //        to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
+          }
         }
         
         // Initiate transfer of data to files
         resources[resource_num]->async_done = false;
-        cuda_notify.schedule(resource.stream, [this, resource_num,
-                                               to_disk, to_disk_r, write_tree_r]() {
-          if (!tree_r_only) {
-            this->host_buf_to_disk0.enqueue(to_disk);
+        cuda_notify.schedule(resource.stream, [this, resource_num, &disk_batcher,
+                                               to_disk, to_disk_r, write_tree_r, write_tree_c]() {
+          if (resources[resource_num]->last) {
+            gpu_results_in_use.unlock();
+          }
+          if (write_tree_c) {
+            assert(disk_batcher.enqueue(to_disk));
           }
           if (write_tree_r) {
-            this->host_buf_to_disk0.enqueue(to_disk_r);
+            assert(disk_batcher.enqueue(to_disk_r));
           }
           resources[resource_num]->async_done = true;
         });
@@ -742,24 +996,22 @@ void pc2_t<C>::hash_gpu(size_t partition) {
       }
     }
   }
-  //printf("PC2: GPU state machine done, syncing streams\n");
   for (size_t resource_num = 0; resource_num < stream_count; resource_num++) {
     resources[resource_num]->stream.sync();
   }
+  disk_batcher.flush();
 
   terminate = true;
 
   // Really only need this at the last partition...
-  if (tree_r_only) {
-    while (disk_writer_done < 1) {}
-  } else {
-    while (disk_writer_done < 2) {}
-  }
+  while (disk_writer_done > 0) {}
+
+  //printf("num_writes %ld\n", num_writes);
 }
 
 template<class C>
 void pc2_t<C>::hash_cpu(fr_t* roots, size_t partition, fr_t* input,
-                        std::vector<mmap_t<uint8_t>>* tree_files,
+                        std::vector<file_writer_t<fr_t>*>* tree_files,
                         size_t file_offset) {
   // This count is one layer above the leaves
   const size_t nodes_to_hash = batch_size * stream_count / TREE_ARITY / TREE_ARITY;
@@ -791,8 +1043,7 @@ void pc2_t<C>::hash_cpu(fr_t* roots, size_t partition, fr_t* input,
                         sector * group_size + node_in_group];
         }
         hasher.Hash((uint8_t*)out, (uint8_t*)in);
-        memcpy(&tree_files[sector][partition][offset],
-               &out[0], sizeof(fr_t));
+        tree_files[sector][partition]->write_data(offset / sizeof(fr_t), &out[0], 1);
       }
     } else {
       for (size_t sector = 0; sector < C::PARALLEL_SECTORS; sector++) {
@@ -802,9 +1053,7 @@ void pc2_t<C>::hash_cpu(fr_t* roots, size_t partition, fr_t* input,
           in[i] = (*w.inputs[i])[sector];
         }
         hasher.Hash((uint8_t*)out, (uint8_t*)in);
-        
-        memcpy(&tree_files[sector][partition][offset],
-               &out[0], sizeof(fr_t));
+        tree_files[sector][partition]->write_data(offset / sizeof(fr_t), (fr_t*)&out[0], 1);
       }
     }
   };
@@ -836,14 +1085,7 @@ void pc2_t<C>::write_roots(fr_t* roots_c, fr_t* roots_r) {
       }
       hasher.Hash((uint8_t*)&out_r, (uint8_t*)in);
     
-      const size_t MAX = 256;
-      char fname[MAX];
-      if (C::PARALLEL_SECTORS == 1) {
-        snprintf(fname, MAX, p_aux_template, output_dir);
-      } else {
-        snprintf(fname, MAX, p_aux_template, output_dir, sector);
-      }
-      int p_aux = open(fname, O_RDWR | O_CREAT, (mode_t)0664);
+      int p_aux = open(p_aux_filenames[sector].c_str(), O_RDWR | O_CREAT, (mode_t)0664);
       assert (p_aux != -1);
       if (tree_r_only) {
         fr_t zero;
@@ -860,14 +1102,7 @@ void pc2_t<C>::write_roots(fr_t* roots_c, fr_t* roots_r) {
       fr_t out_c = roots_c[sector];
       fr_t out_r = roots_r[sector];
 
-      const size_t MAX = 256;
-      char fname[MAX];
-      if (C::PARALLEL_SECTORS == 1) {
-        snprintf(fname, MAX, p_aux_template, output_dir);
-      } else {
-        snprintf(fname, MAX, p_aux_template, output_dir, sector);
-      }
-      int p_aux = open(fname, O_RDWR | O_CREAT, (mode_t)0664);
+      int p_aux = open(p_aux_filenames[sector].c_str(), O_RDWR | O_CREAT, (mode_t)0664);
       assert (p_aux != -1);
       if (tree_r_only) {
         fr_t zero;
@@ -936,11 +1171,46 @@ template void pc2_hash<sealing_config2_t>(SectorParameters& params, topology_t& 
                                           size_t nodes_to_read, size_t batch_size,
                                           size_t stream_count,
                                           const char** data_filenames, const char* output_dir);
-template void pc2_hash<sealing_config1_t>(SectorParameters& params, topology_t& topology,
-                                          bool tree_r_only,
-                                          streaming_node_reader_t<sealing_config1_t>& reader,
-                                          size_t nodes_to_read, size_t batch_size,
-                                          size_t stream_count,
-                                          const char** data_filenames, const char* output_dir);
 
+template<class C>
+void do_pc2_cleanup(SectorParameters& params, const char* output_dir) {
+  std::vector<std::string> directories;
+  std::vector<std::string> p_aux_filenames;
+  std::vector<std::vector<std::string>> tree_c_filenames;
+  std::vector<std::vector<std::string>> tree_r_filenames;
+  std::vector<std::string> sealed_filenames;
+  
+  pc2_t<C>::get_filenames(params, output_dir,
+                          directories,
+                          p_aux_filenames,
+                          tree_c_filenames,
+                          tree_r_filenames,
+                          sealed_filenames);
+
+  for (auto fname : p_aux_filenames) {
+    std::filesystem::remove(fname);
+  }
+  for (auto fname : sealed_filenames) {
+    std::filesystem::remove(fname);
+  }
+  for (size_t i = 0; i < tree_c_filenames.size(); i++) {
+    for (auto fname : tree_c_filenames[i]) {
+      std::filesystem::remove(fname);
+    }
+  }
+  for (size_t i = 0; i < tree_r_filenames.size(); i++) {
+    for (auto fname : tree_r_filenames[i]) {
+      std::filesystem::remove(fname);
+    }
+  }
+}
+
+template void do_pc2_cleanup<sealing_config128_t>(SectorParameters& params, const char* output_dir);
+template void do_pc2_cleanup<sealing_config64_t>(SectorParameters& params, const char* output_dir);
+template void do_pc2_cleanup<sealing_config32_t>(SectorParameters& params, const char* output_dir);
+template void do_pc2_cleanup<sealing_config16_t>(SectorParameters& params, const char* output_dir);
+template void do_pc2_cleanup<sealing_config8_t>(SectorParameters& params, const char* output_dir);
+template void do_pc2_cleanup<sealing_config4_t>(SectorParameters& params, const char* output_dir);
+template void do_pc2_cleanup<sealing_config2_t>(SectorParameters& params, const char* output_dir);
+                                            
 #endif

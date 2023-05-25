@@ -73,12 +73,6 @@ int do_pc1(nvme_controllers_t* controllers,
   //node_id_t node_stop(NODE_COUNT * 0 + NODE_COUNT / 32);
   node_id_t node_stop(NODE_COUNT * LAYER_COUNT);
 
-  // node_id_t node_start = NODE_COUNT * 1;
-  // node_id_t node_stop(NODE_COUNT * 1 + NODE_COUNT / 32);
-
-  // printf("Hashing node %lx to node %lx for %ld sectors\n",
-  //        node_start.id(), node_stop.id(), C::PARALLEL_SECTORS);
-  
   system_buffers_t<C> system(*sector_config);
   SPDK_ERROR(system.init(controllers->size()));
 
@@ -122,16 +116,14 @@ int do_pc1(nvme_controllers_t* controllers,
   channel_t<size_t> ch;
   pool.spawn([&]() {
     size_t core_num = topology.pc1_reader;
-    //printf("Setting affinity for rw handler to core %ld\n", core_num);
     set_core_affinity(core_num);
-    assert(parent_reader.process() == 0);
+    assert(parent_reader.process(topology.pc1_reader_sleep_time) == 0);
     ch.send(0);
   });
   pool.spawn([&]() {
     size_t core_num = topology.pc1_writer;
-    //printf("Setting affinity for node_writer to core %ld\n", core_num);
     set_core_affinity(core_num);
-    assert(node_writer.process() == 0);
+    assert(node_writer.process(topology.pc1_writer_sleep_time, 10) == 0);
     ch.send(0);
   });
 
@@ -140,7 +132,6 @@ int do_pc1(nvme_controllers_t* controllers,
   for (size_t coord_id = 0; coord_id < sector_config->num_coordinators(); coord_id++) {
     size_t core_num = sector_config->get_coordinator_core(coord_id);
     pool.spawn([&, sector_config, coord_id, core_num, sector, hasher_count]() {
-      //printf("Setting affinity for hasher %ld to core %ld\n", coord_id, core_num);
       set_core_affinity(core_num);
       coordinator_t coordinator(terminator, system,
                                 coord_id, sector,
@@ -157,7 +148,6 @@ int do_pc1(nvme_controllers_t* controllers,
     
   timestamp_t start = std::chrono::high_resolution_clock::now();
   size_t core_num = topology.pc1_orchestrator;
-  //printf("Setting affinity for orchestrator_t to core %ld\n", core_num);
   set_core_affinity(core_num);
     
   orchestrator.process(true);
@@ -209,6 +199,11 @@ template int do_pc1<sealing_config4_t>(nvme_controllers_t* controllers,
                                        const uint32_t* replica_ids,
                                        const char* parents_filename);
 template int do_pc1<sealing_config2_t>(nvme_controllers_t* controllers,
+                                       topology_t& topology,
+                                       uint64_t block_offset,
+                                       const uint32_t* replica_ids,
+                                       const char* parents_filename);
+template int do_pc1<sealing_config1_t>(nvme_controllers_t* controllers,
                                        topology_t& topology,
                                        uint64_t block_offset,
                                        const uint32_t* replica_ids,

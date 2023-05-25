@@ -4,9 +4,9 @@
 
 #include "../../nvme/ring_t.hpp"
 #include "../pc2_internal.hpp"
-#include "../../util/mmap_t.hpp"
+#include "file_writer_t.hpp"
 
-// #define DISABLE_FILE_READS
+//#define DISABLE_FILE_READS
 //#define DISABLE_FILE_WRITES
 
 // Class to compute the offset of serialized nodes in a tree.
@@ -153,7 +153,9 @@ struct buf_to_disk_t {
   // Block of data from the device (pointed into by src)
   fr_t* data;
   // Destination address (mmapped file)
-  fr_t* dst[C::PARALLEL_SECTORS];
+  file_writer_t<fr_t>* dst[C::PARALLEL_SECTORS];
+  size_t offset;
+  
   // Source address
   fr_t* src[C::PARALLEL_SECTORS];
   // Size of each write, in field elements
@@ -179,18 +181,19 @@ private:
   size_t nodes_per_stream;
   
   // Array of vectors of mapped files
-  std::vector<mmap_t<uint8_t>> tree_c_files[C::PARALLEL_SECTORS];
-  std::vector<mmap_t<uint8_t>> tree_r_files[C::PARALLEL_SECTORS];
+  std::vector<file_writer_t<fr_t>*> tree_c_files[C::PARALLEL_SECTORS];
+  std::vector<file_writer_t<fr_t>*> tree_r_files[C::PARALLEL_SECTORS];
   // Files that store the data being sealed
   mmap_t<fr_t> data_files[C::PARALLEL_SECTORS];
   // Files that store the sealed data
-  mmap_t<fr_t> sealed_files[C::PARALLEL_SECTORS];
+  file_writer_t<fr_t> sealed_files[C::PARALLEL_SECTORS];
 
   // Store the partition roots
   std::vector<fr_t> tree_c_partition_roots;
   std::vector<fr_t> tree_r_partition_roots;
   
   // Storage to transfer results from GPU to CPU for tree-c and tree-r
+  std::mutex gpu_results_in_use;
   host_ptr_t<fr_t> gpu_results_c;
   host_ptr_t<fr_t> gpu_results_r;
 
@@ -213,19 +216,33 @@ private:
   // Buffer pool for data coming back from GPU
   // The number of buffers should be large enough to hide disk IO delays.
   // 
-  const size_t num_host_bufs = 1<<16;
+  static const size_t num_host_bufs = 1<<13;
+  static const size_t disk_io_batch_size = 64;
+  // static const size_t num_host_bufs = 64;
+  // static const size_t disk_io_batch_size = 4;
+  static const size_t num_host_batches = num_host_bufs / disk_io_batch_size;
+  // Should be a minimum of gpu resources / disk_io_batch_size
+  static const size_t num_host_empty_batches = 8;
+public:
+  typedef batch_t<buf_to_disk_t<C>*, disk_io_batch_size> buf_to_disk_batch_t;
+private:
+  
+  // Memory space for the host side buffers
   host_ptr_t<fr_t> host_buf_storage;
-  std::vector<buf_to_disk_t<C>> host_bufs0;
-  std::vector<buf_to_disk_t<C>> host_bufs1;
-  // Used to write tree-r, tree-c
-  mt_fifo_t<buf_to_disk_t<C>> host_buf_pool0;
-  mt_fifo_t<buf_to_disk_t<C>> host_buf_to_disk0;
-  // Used to write sealed-data
-  mt_fifo_t<buf_to_disk_t<C>> host_buf_pool1;
-  mt_fifo_t<buf_to_disk_t<C>> host_buf_to_disk1;
+  // Store the host buffer batch objects
+  // Each batch contains disk_io_batch_size buffers, each of which contains
+  // batch_size * C::PARALLEL_SECTORS field elements.
+  std::vector<buf_to_disk_t<C>> host_bufs;
+  std::vector<buf_to_disk_batch_t> host_batches;
+  // Queue to write to disk
+  mtx_fifo_t<buf_to_disk_batch_t> host_buf_to_disk;
+  // Pool of available full batches
+  mtx_fifo_t<buf_to_disk_batch_t> host_buf_pool_full;
+  // Pool of available empty batches
+  mtx_fifo_t<buf_to_disk_batch_t> host_buf_pool_empty;
 
-  // p_aux file template
-  const char* p_aux_template;
+  // p_aux filenames
+  std::vector<std::string> p_aux_filenames;
 
   // When performing data encoding, the source data files. `data_filenames`
   // or any individual pointer may be null, in which case CC is assumed.
@@ -237,14 +254,24 @@ private:
   // The output directory for files we will write
   const char* output_dir;
 
+public:
+  static void get_filenames(SectorParameters& params, const char* output_dir,
+                            std::vector<std::string>& directories,
+                            std::vector<std::string>& p_aux_filenames,
+                            std::vector<std::vector<std::string>>& tree_c_filenames,
+                            std::vector<std::vector<std::string>>& tree_r_filenames,
+                            std::vector<std::string>& sealed_filenames);
+private:
+  void open_files();
+  
   void hash_gpu(size_t partition);
   void hash_cpu(fr_t* roots, size_t partition, fr_t* input,
-                std::vector<mmap_t<uint8_t>>* tree_files,
+                std::vector<file_writer_t<fr_t>*>* tree_files,
                 size_t file_offset);
   void write_roots(fr_t* roots_c, fr_t* roots_r);
-  void process_writes(int core,
-                      mt_fifo_t<buf_to_disk_t<C>>& to_disk,
-                      mt_fifo_t<buf_to_disk_t<C>>& pool,
+  void process_writes(int core, size_t max_write_size,
+                      mtx_fifo_t<buf_to_disk_batch_t>& to_disk,
+                      mtx_fifo_t<buf_to_disk_batch_t>& pool,
                       std::atomic<bool>& terminate,
                       std::atomic<int>& disk_writer_done);
   

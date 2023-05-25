@@ -259,6 +259,12 @@ build/examples/perf -b <disk pcie address> -q 64 -o 4096 -w randread -t 10
 
 The PC2 and C1 processes write files into the local filesystem (`/var/tmp/supra_seal`). For best performance this should be a dedicated disk, ideally a separate disk from where the parent cache is stored so that writing during PC2 does not impact read performance during PC1. The simplest way is to symlink `/var/tmp/supra_seal` to the desired location, but those paths can also be adjusted in `demos/main.cpp` and `demos/rust/main.rs`.
 
+Empirically we have found it's preferable to consolidate the disks with filesystems within the same PCIe controller, thereby minimizing mixing with SPDK owned disks. Presumably the differing nature of the IO traffic (read heavy for PC1 vs. write heavy for PC2) results in lower performance when mixed.
+
+We also use F2FS for the PC2 storage disks, as this is designed specifically for flash based storage. If using ext4 disabling journaling is recommended. 
+
+Finally we recommend mounting the PC2 drives with the `lazytime` option to avoid frequenty meta data updates (`mount -o lazytime`).
+
 # Running
 
 There are both Rust and c++ based demos that will perform PC1, PC2, and C1 on multiple pipelines. They both demonstrate concurrent PC1/PC2/C1 processes along the lines of the flowchart below. The main constraints exist around PC1 and PC2, which respectively utilize the CPU core and GPU(s) heavily so care must be taken to stage them for best performance. For example two PC1's or two PC2's should not typically be run concurrently. 

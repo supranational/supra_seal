@@ -1,5 +1,7 @@
 // Copyright Supranational LLC
 
+#include <iostream>
+
 #ifndef __NVME_CONTROLLER_T_HPP__
 #define __NVME_CONTROLLER_T_HPP__
 
@@ -17,6 +19,15 @@ private:
   std::vector<nvme_namespace_t> namespaces;
   std::vector<nvme_qpair_t*>    qpairs;
 
+
+  static void get_log_page_completion(void *cb_arg, const struct spdk_nvme_cpl *cpl) {
+    if (spdk_nvme_cpl_is_error(cpl)) {
+      printf("WARNING: SPDK get log page failed\n");
+    }
+    std::mutex* mtx = (std::mutex*)cb_arg;
+    mtx->unlock();
+  }
+  
 public:
   nvme_controller_t(const char* _name,
                     struct spdk_nvme_ctrlr* _ctrlr) {
@@ -36,6 +47,26 @@ public:
     return namespaces[ns_id].get_page_count();
   }
 
+  // Get controller temp in degrees C
+  int get_temp() {
+    std::mutex mtx;
+    mtx.lock();
+    static struct spdk_nvme_health_information_page health_page;
+  	int rc = spdk_nvme_ctrlr_cmd_get_log_page(ctrlr, SPDK_NVME_LOG_HEALTH_INFORMATION,
+                                              SPDK_NVME_GLOBAL_NS_TAG, &health_page,
+                                              sizeof(health_page), 0,
+                                              get_log_page_completion, &mtx);
+    if (rc != 0) {
+      printf("WARNING: could not read controller temperature\n");
+      return 0;
+    }
+    while (!mtx.try_lock()) {
+      spdk_nvme_ctrlr_process_admin_completions(ctrlr);
+      usleep(100);
+    }
+    return (int)health_page.temperature - 273;
+  }
+  
   void cleanup() {
     for (auto it: qpairs) {
       it->cleanup();
@@ -238,6 +269,16 @@ public:
 
   size_t size() {
     return controllers.size();
+  }
+
+  void print_temperatures() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t time = std::chrono::system_clock::to_time_t(now);
+
+    std::cout << "NVME Controller temperatures (C) " << std::ctime(&time);
+    for (auto it: controllers) {
+      std::cout << "  " << it->get_name() << ": " << it->get_temp() << std::endl;
+    }
   }
 
   nvme_controller_t &operator[](size_t i) {

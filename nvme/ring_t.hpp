@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <vector>
 #include <atomic>
+#include <mutex>
 #include <assert.h>
 
 void ring_spdk_free(void *);
@@ -20,12 +21,9 @@ class mt_fifo_t {
   // If we allocated the contents store the pointer
   T *contents;
 
-  // TODO: use atomics for head and tail, check perf impact
   // 'head' tracks the next unused element.
-  //volatile size_t head;
   std::atomic<size_t> head;
   // 'tail' tracks the last used element
-  //volatile size_t tail;
   std::atomic<size_t> tail;
   
 public:
@@ -240,6 +238,63 @@ public:
   bool is_full() {
     return size() == store.size() - 1;
   }
+
+  size_t capacity() {
+    return store.size() - 1;
+  }
+
+  inline size_t free_count() {
+    return capacity() - size();
+  }
+};
+
+template <class T>
+class mtx_fifo_t {
+  pool_t<T> pool;
+  std::mutex mtx;
+  
+public:
+  int create(size_t _count) {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.create(_count);
+  }
+
+  int enqueue(T *obj) {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.enqueue(obj);
+  }
+
+  T* dequeue() {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.dequeue();
+  }
+
+  // Number of used entries in the ring
+  size_t size() {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.size();
+  }
+
+  // Get entry at index
+  T& operator[](size_t i) {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool[i];
+  }
+
+  bool is_full() {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.is_full();
+  }
+
+  size_t capacity() {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.capacity();
+  }
+
+  inline size_t free_count() {
+    std::unique_lock<std::mutex> lock(mtx);
+    return pool.free_count();
+  }
 };
 
 // Ring buffer for data from disk
@@ -279,13 +334,11 @@ private:
   //   0    1    1    1    1    1    1    1    1    1    0    1    0    0
   //  valid
 
-  // TODO: try using atomics for head and tail
   // 'head' tracks the next unused element.
   size_t head;
   // 'head_valid' tracks the point at which all previous elements are valid
   size_t head_valid;
   // 'tail' tracks the last used element
-  //volatile size_t tail;
   size_t tail;
   // track size
   size_t cur_size;

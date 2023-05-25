@@ -73,8 +73,9 @@ public:
     }
     
     if (is_write) {
-      lseek(fd, size - 1, SEEK_SET);
-      assert (write(fd, "", 1) != -1);
+      // lseek(fd, size - 1, SEEK_SET);
+      // assert (write(fd, "", 1) != -1);
+      posix_fallocate(fd, 0, size);
     } else {
       struct stat statbuf;
       fstat(fd, &statbuf);
@@ -113,6 +114,16 @@ public:
   inline operator void*() const               { return (void*)data; }
   inline const T& operator[](size_t i) const  { return data[i]; }
   inline T& operator[](size_t i)              { return data[i]; }
+
+  void write_data(size_t offset, T* buf, size_t size) {
+    assert (is_open());
+    memcpy(&data[offset], buf, size * sizeof(T));
+  }
+
+  void read_data(size_t offset, T* buf, size_t size) {
+    assert (is_open());
+    memcpy(buf, &data[offset], size * sizeof(T));
+  }
 };
 
 #endif

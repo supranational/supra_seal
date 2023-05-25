@@ -52,14 +52,14 @@ void demo_pipeline(size_t num_sectors, uint8_t* replica_ids) {
   });
   std::thread j1([&]() {
     printf("Starting slot0 pc2\n");
-    pc2(slot0, num_sectors, output_dir0);
+    pc2(slot0, num_sectors, output_dir0, nullptr);
   });
   j0.join();
   j1.join();
 
   // slot1 pc2
   printf("Starting slot1 pc2\n");
-  pc2(slot1, num_sectors, output_dir1);
+  pc2(slot1, num_sectors, output_dir1, nullptr);
 
 }
 
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
   uint64_t node_to_read = 0;
   uint64_t slot = 0;
   size_t   num_sectors = 64;
-  const char* output_dir = "/var/tmp/supra_seal/";
+  const char* output_dir = "/var/tmp/supra_seal/0";
 
   enum { SEAL_MODE, READ_MODE, PARENTS_MODE, PIPELINE_MODE } mode = PIPELINE_MODE;
   bool perform_pc1 = false;
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
     }
 
     if (perform_pc2) {
-      pc2(block_offset, num_sectors, output_dir);      
+      pc2(block_offset, num_sectors, output_dir, nullptr);
     }
 
     if (perform_c1) {

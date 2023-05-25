@@ -5,17 +5,14 @@
 
 #![feature(vec_into_raw_parts)]
 
-use anyhow::Context;
-use bincode::deserialize;
-use filecoin_proofs_api::{RegisteredSealProof, SectorId};
+use filecoin_proofs_api::RegisteredSealProof;
 use filecoin_proofs_v1::{
-    PoRepConfig, ProverId, seal_commit_phase2, SealCommitPhase1Output,
-    Ticket, verify_seal,
+    ProverId, 
+    Ticket,
 };
 
 use sha2::{Digest, Sha256};
 use std::ffi::CString;
-use std::fs::read;
 use std::os::raw::c_char;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -23,9 +20,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::thread;
 use storage_proofs_core::{
-    api_version::ApiVersion,
     merkle::MerkleTreeTrait,
 };
+
+extern crate chrono;
 
 pub type ReplicaId = Vec<u8>;
 
@@ -45,8 +43,12 @@ extern "C" {
 
     fn pc2(block_offset: usize,
            num_sectors: usize,
-           output_dir: *const c_char) -> u32;
+           output_dir: *const c_char,
+           data_filenames: *const *const c_char) -> u32;
 
+    fn pc2_cleanup(num_sectors: usize,
+                   output_dir: *const c_char) -> u32;
+    
     fn c1(block_offset: usize,
           num_sectors: usize,
           sector_slot: usize,
@@ -99,8 +101,19 @@ pub fn pc2_wrapper<T: AsRef<std::path::Path>>(
     path: T) -> u32 {
 
     let path_c = CString::new(path.as_ref().as_os_str().as_bytes()).unwrap();
-    let pc2_status = unsafe { pc2(block_offset, num_sectors, path_c.as_ptr()) };
+    let pc2_status = unsafe { pc2(block_offset, num_sectors,
+                                  path_c.as_ptr(), std::ptr::null()) };
     println!("PC2 returned {}", pc2_status);
+    return pc2_status;
+}
+
+pub fn pc2_cleanup_wrapper<T: AsRef<std::path::Path>>(
+    num_sectors: usize,
+    path: T) -> u32 {
+
+    let path_c = CString::new(path.as_ref().as_os_str().as_bytes()).unwrap();
+    let pc2_status = unsafe { pc2_cleanup(num_sectors, path_c.as_ptr()) };
+    println!("PC2 cleanup returned {}", pc2_status);
     return pc2_status;
 }
 
@@ -166,19 +179,22 @@ fn create_replica_id(
 
 fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     num_sectors: usize,
-    porep_config: PoRepConfig,
+    c2_cores: &str,
     parents_cache_filename: &str,
     registered_proof: RegisteredSealProof,
     comm_d: [u8; 32],
 ) {
-    //let wait_seed_time = Duration::from_secs(60 * 75); // 75 min
-    let wait_seed_time = Duration::from_secs(60 * 1); // for testing
+    #[cfg(feature = "32GiB")]
+    let wait_seed_time = Duration::from_secs(60 * 75); // 75 min
+
+    #[cfg(feature = "512MiB")]
+    let wait_seed_time = Duration::from_secs(30); // 30s
 
     let mut parents_cache_file = PathBuf::new();
     parents_cache_file.push(parents_cache_filename);
 
-    // This is optional but if persent must be the first call into the library
-    //init_wrapper("supra_seal_zen2.cfg");
+    // This is optional but if present must be the first call into the library
+    //init_wrapper("supra_seal_zen.cfg");
 
     let max_offset = get_max_block_offset_wrapper();
     let slot_size = get_slot_size_wrapper(num_sectors);
@@ -192,14 +208,18 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     let seed: Ticket = [ 0u8; 32];
 
     // Example showing operations running in parallel
-    let sector_ids = Arc::new(Mutex::new(0u64));
     let pc1_counter = Arc::new(Mutex::new((0, 0)));
     let pc2_counter = Arc::new(Mutex::new(0));
+    let c1_counter = Arc::new(Mutex::new(0));
     let c2_counter = Arc::new(Mutex::new(0));
-    let passed_counter = Arc::new(Mutex::new(0));
+    
+    //let passed_counter = Arc::new(Mutex::new(0));
     let failed_counter = Arc::new(Mutex::new(0));
     let gpu_counter = Arc::new(Mutex::new(0));
 
+    let pipeline_start = Arc::new(Mutex::new(Instant::now()));
+    let gpu_lock = Arc::new(Mutex::new(false));
+    
     // Specify the number of slots that can be run at a time
     // This will come down to resources on the machine and number of sectors
     //   being sealed in parallel.
@@ -211,36 +231,37 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     // Batch 0  PC1  PC2   C1   C2
     // Batch 1       PC1  PC2   C1   C2
     // Batch 2            PC1  PC2   C1   C2
-    for i in 0..3 {
-        //let block_offset = Arc::clone(&block_offset);
-        let sector_ids = Arc::clone(&sector_ids);
+    let num_batches = 5;
+    for batch_num in 0..num_batches {
         let pc1_counter = Arc::clone(&pc1_counter);
         let pc2_counter = Arc::clone(&pc2_counter);
+        let c1_counter = Arc::clone(&c1_counter);
         let c2_counter = Arc::clone(&c2_counter);
-        let passed_counter = Arc::clone(&passed_counter);
+        let c2_cores = c2_cores.to_string();
+
         let failed_counter = Arc::clone(&failed_counter);
         let gpu_counter = Arc::clone(&gpu_counter);
         let slot_counter = Arc::clone(&slot_counter);
         let parents_cache_file = parents_cache_file.clone();
 
+        let pipeline_start = Arc::clone(&pipeline_start);
+        let gpu_lock = Arc::clone(&gpu_lock);
+        
         let pipeline = thread::spawn(move || {
-            let pipe_dir = "/var/tmp/supra_seal/".to_owned() + &i.to_string();
+            let pipe_dir = "/var/tmp/supra_seal/".to_owned() + &batch_num.to_string();
             let output_dir = Path::new(&pipe_dir);
 
             // Grab unique sector ids for each sector in the batch
-            let mut start_sector_id = sector_ids.lock().unwrap();
-            let mut cur_sector_id = *start_sector_id;
-            let mut slots_sector_id = cur_sector_id;
-            *start_sector_id += num_sectors as u64;
-            drop(start_sector_id);
+            let batch_sector_start = batch_num * num_sectors;
 
             // Create replica_ids
+            let mut cur_sector_id = batch_sector_start;
             let mut replica_ids: Vec<ReplicaId> = Vec::new();
             for _ in 0..num_sectors {
                 let replica_id = create_replica_id(
                     prover_id,
                     registered_proof,
-                    cur_sector_id,
+                    cur_sector_id as u64,
                     &comm_d,
                     ticket);
 
@@ -248,59 +269,106 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
                 replica_ids.push(replica_id);
             }
 
-            // Lock the slot
-            let cur_slot = i % num_slots;
-            let mut slot_count = slot_counter[cur_slot].lock().unwrap();
-            println!("\n**** Batch {} locked slot {}", i, cur_slot);
-            *slot_count += 1;
-
-            // Lock PC1
-            let mut pc1_count = pc1_counter.lock().unwrap();
-            println!("\n**** Batch {} start PC1", i);
-            let cur_offset = (*pc1_count).1;
-            (*pc1_count).0 += 1;
-            (*pc1_count).1 += slot_size;
-
-            // Check if pc1 will overflow available disk space
-            if ((*pc1_count).1 + slot_size) >  max_offset {
-                (*pc1_count).1 = 0;
+            // Indent based on batch number
+            let mut indent: String = "".to_owned();
+            for _x in 0..batch_num {
+                indent += "    ";
             }
 
+            if batch_num > 0 { // TODO SNP: testing only, remove
+            // Wait until it's time for this batch's pc1 to start
+            {
+                let mut pc1_counter_lock = pc1_counter.lock().unwrap();
+                while (*pc1_counter_lock).0 != batch_num {
+                    drop(pc1_counter_lock);
+                    thread::sleep(Duration::from_millis(100));
+                    pc1_counter_lock = pc1_counter.lock().unwrap();
+                }
+            }
+            
+            // Lock the slot
+            let cur_slot = batch_num % num_slots;
+            let mut slot_count = slot_counter[cur_slot].lock().unwrap();
+            println!("{}**** {} Batch {} locked slot {}", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num, cur_slot);
+            *slot_count += 1;
+            
+            // Lock PC1
+            let cur_offset;
             let cp_replica_ids = replica_ids.clone();
-
-            // Do PC1
-            pc1_wrapper(cur_offset, num_sectors,
-                        replica_ids, parents_cache_file.clone());
-
-            // PC1 is complete, drop mutex
-            drop(pc1_count);
-            println!("\n**** Batch {} done with PC1", i);
-
-            let mut pc2_count = pc2_counter.lock().unwrap();
-            let mut gpu_count = gpu_counter.lock().unwrap();
-            println!("\n**** Batch {} start PC2", i);
-            *pc2_count += 1;
-            *gpu_count += 1;
-
-            pc2_wrapper(cur_offset, num_sectors, output_dir);
-
-            drop(pc2_count);
-            drop(gpu_count);
-            println!("\n**** Batch {} done with PC2", i);
-
-            println!("\n**** Batch {} Wait Seed sleeping {:?}",
-                     i, wait_seed_time);
+            {
+                let mut pc1_count = pc1_counter.lock().unwrap();
+                println!("{}**** {} Batch {} start PC1", indent,
+                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                         batch_num);
+                cur_offset = (*pc1_count).1;
+                (*pc1_count).1 += slot_size;
+                
+                // Check if pc1 will overflow available disk space
+                if ((*pc1_count).1 + slot_size) >  max_offset {
+                    (*pc1_count).1 = 0;
+                }
+                
+                // Do PC1
+                if batch_num > 0 { // TODO SNP: testing only, remove
+                    pc1_wrapper(cur_offset, num_sectors,
+                                replica_ids, parents_cache_file.clone());
+                }
+                (*pc1_count).0 += 1;
+                println!("{}**** {} Batch {} done with PC1", indent,
+                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                         batch_num);
+            }
+            
+            // PC2
+            {
+                let mut gpu_lock = gpu_lock.lock().unwrap();
+                *gpu_lock = true;
+                
+                if batch_num == 1 {
+                    let mut pipeline_start_lock = pipeline_start.lock().unwrap();
+                    *pipeline_start_lock = Instant::now();
+                    drop(pipeline_start_lock);
+                    println!("\n**** {} Pipeline start\n",
+                             chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"));
+                }
+                
+                let mut pc2_count = pc2_counter.lock().unwrap();
+                let mut gpu_count = gpu_counter.lock().unwrap();
+                println!("{}**** {} Batch {} start PC2", indent,
+                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                         batch_num);
+                *gpu_count += 1;
+                
+                pc2_wrapper(cur_offset, num_sectors, output_dir);
+                *pc2_count += 1;
+                *gpu_lock = false;
+                println!("{}**** {} Batch {} done with PC2", indent,
+                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                         batch_num);
+            }
+            
+            println!("{}**** {} Batch {} Wait Seed sleeping {:?}", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num, wait_seed_time);
             thread::sleep(wait_seed_time);
-
+            println!("{}**** {} Batch {} Wait Seed done sleeping", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num);
+            
+            // C1
             // Each of these can be parallelized, however the function only
             //  operates on a single sector at a time as opposed to PC1/PC2
-            println!("\n**** Batch {} start C1", i);
+            println!("{}**** {} Batch {} start C1", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num);
             for sector_slot in 0..num_sectors {
                 let mut cur_cache_path = PathBuf::from(output_dir);
                 cur_cache_path.push(format!("{:03}", sector_slot));
                 let mut cur_replica_dir = PathBuf::from(output_dir);
                 cur_replica_dir.push(format!("{:03}", sector_slot));
-
+                
                 c1_wrapper(cur_offset,
                            num_sectors,
                            sector_slot,
@@ -312,92 +380,83 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
                            parents_cache_file.clone(),
                            cur_replica_dir);
             }
-            println!("\n**** Batch {} done with C1", i);
-
+            *c1_counter.lock().unwrap() += 1;
+            println!("{}**** {} Batch {} done with C1", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num);
+            
             // At this point the layers on NVME for this batch can be reused
-            println!("\n**** Batch {} dropping lock on slot {}", i, cur_slot);
+            println!("{}**** {} Batch {} dropping lock on slot {}", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num, cur_slot);
             drop(slot_count);
-
-            println!("\n**** Batch {} start C2", i);
-            let mut c2_count = c2_counter.lock().unwrap();
-            gpu_count = gpu_counter.lock().unwrap();
-            *c2_count += 1;
-            *gpu_count += 1;
-
-            for sector_slot in 0..num_sectors {
-                let commit_phase1_output = {
-                    let mut commit_phase1_output_path =
-                        PathBuf::from(output_dir);
-                    commit_phase1_output_path.push(
-                        format!("{:03}/commit-phase1-output", sector_slot)
-                    );
-                    println!("*** Restoring commit phase1 output file");
-                    let commit_phase1_output_bytes =
-                        read(&commit_phase1_output_path).with_context(|| {
-                            format!(
-                                "couldn't read commit_phase1_output_path={:?}",
-                                commit_phase1_output_path
-                            )
-                        }).unwrap();
-                    println!("commit_phase1_output_bytes len {}",
-                             commit_phase1_output_bytes.len());
-
-                    let res: SealCommitPhase1Output<Tree> =
-                        deserialize(&commit_phase1_output_bytes).unwrap();
-                    res
-                };
-
-                let SealCommitPhase1Output {
-                    vanilla_proofs: _,
-                    comm_d,
-                    comm_r,
-                    replica_id: _,
-                    seed,
-                    ticket,
-                } = commit_phase1_output;
-
-                let sector_id = SectorId::from(slots_sector_id as u64);
-                slots_sector_id += 1;
-
-                println!("Starting seal_commit_phase2");
-                let now = Instant::now();
-                let commit_output = seal_commit_phase2(
-                    porep_config,
-                    commit_phase1_output,
-                    prover_id,
-                    sector_id
-                )
-                .unwrap();
-                println!("seal_commit_phase2 took: {:.2?}", now.elapsed());
-
-                let result = verify_seal::<Tree>(
-                    porep_config,
-                    comm_r,
-                    comm_d,
-                    prover_id,
-                    sector_id,
-                    ticket,
-                    seed,
-                    &commit_output.proof,
-                )
-                .unwrap();
-
-                if result == true {
-                  let mut passed_count = passed_counter.lock().unwrap();
-                  *passed_count += 1;
-                  drop(passed_count);
-                  println!("Verification PASSED!");
-                } else {
-                  let mut failed_count = failed_counter.lock().unwrap();
-                  *failed_count += 1;
-                  drop(failed_count);
-                  println!("Verification FAILED!");
+            
+            // Delete pc2 content
+            println!("{}**** {} Batch {} cleanup pc2 on slot {}", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num, cur_slot);
+            pc2_cleanup_wrapper(num_sectors, output_dir);
+            
+            // Wait until it's time for this batch's c2 to start, which is after
+            // the next batch's pc2
+            if batch_num < num_batches - 1 {
+                let mut pc2_counter_lock = pc2_counter.lock().unwrap();
+                while *pc2_counter_lock != batch_num + 2 {
+                    drop(pc2_counter_lock);
+                    thread::sleep(Duration::from_millis(100));
+                    pc2_counter_lock = pc2_counter.lock().unwrap();
                 }
-
             }
+
+            // TODO SNP: testing only, remove
+            } else {
+                let cur_slot = batch_num % num_slots;
+                *slot_counter[cur_slot].lock().unwrap() += 1;
+                let mut pc1_count = pc1_counter.lock().unwrap();
+                (*pc1_count).1 += slot_size;
+                // Check if pc1 will overflow available disk space
+                if ((*pc1_count).1 + slot_size) >  max_offset {
+                    (*pc1_count).1 = 0;
+                }
+                (*pc1_count).0 += 1;
+                
+                *pc2_counter.lock().unwrap() += 1;
+                *c1_counter.lock().unwrap() += 1;
+            }
+                
+            // C2
+            let mut gpu_lock = gpu_lock.lock().unwrap();
+            *gpu_lock = true;
+            println!("{}**** {} Batch {} start C2", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num);
+            let mut c2_count = c2_counter.lock().unwrap();
+            *gpu_counter.lock().unwrap() += 1;
+
+            let now = Instant::now();
+            let status = std::process::Command::new("/usr/bin/taskset")
+                .arg("-c").arg(c2_cores).arg("./target/release/c2")
+                .arg(output_dir).arg(batch_sector_start.to_string())
+                .status().expect("failed to execute process");
+            println!("status: {}", status);
+            println!("{}**** {} Batch {} C2 done took {:.2?}", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num, now.elapsed());
+            *failed_counter.lock().unwrap() += status.code().unwrap();
+
+            if batch_num == 0 {
+                let pipeline_start_lock = pipeline_start.lock().unwrap();
+                println!("**** {} Pipeline took {:?}\n",
+                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                         (*pipeline_start_lock).elapsed());
+            }                
+            println!("{}**** {} Batch {} done with C2", indent,
+                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
+                     batch_num);
+            *c2_count += 1;
             drop(c2_count);
-            drop(gpu_count);
-            println!("\n**** Batch {} done with C2", i);
+            *gpu_lock = false;
+            drop(gpu_lock);
         });
         pipelines.push(pipeline);
     }
@@ -409,9 +468,9 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     let pc1_count = pc1_counter.lock().unwrap();
     println!("PC1 counter: {} {}", (*pc1_count).0, (*pc1_count).1);
     println!("PC2 counter: {}", *pc2_counter.lock().unwrap());
+    println!("C1 counter:  {}", *c1_counter.lock().unwrap());
     println!("C2 counter:  {}", *c2_counter.lock().unwrap());
     println!("GPU counter:  {}", *gpu_counter.lock().unwrap());
-    println!("Passed counter:  {}", *passed_counter.lock().unwrap());
     println!("Failed counter:  {}", *failed_counter.lock().unwrap());
     for i in 0..num_slots {
       println!("Slot counter[{}]: {}", i, *slot_counter[i].lock().unwrap());
@@ -419,7 +478,7 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
 }
 
 #[cfg(feature = "32GiB")]
-fn run_pipeline_32(num_sectors: usize) {
+fn run_pipeline_32(num_sectors: usize, c2_cores: &str) {
     let parents_cache_filename = "/var/tmp/filecoin-parents/v28-sdr-parent-55c7d1e6bb501cc8be94438f89b577fddda4fafa71ee9ca72eabe2f0265aefa6.cache";
 
     // 32GB CC sector comm d
@@ -430,15 +489,9 @@ fn run_pipeline_32(num_sectors: usize) {
 
     let registered_proof = RegisteredSealProof::StackedDrg32GiBV1_1;
 
-    let arbitrary_porep_id = [99; 32];
-    let porep_config = PoRepConfig::new_groth16(
-        filecoin_proofs_v1::constants::SECTOR_SIZE_32_GIB,
-        arbitrary_porep_id,
-        ApiVersion::V1_1_0);
-
     run_pipeline::<filecoin_proofs_v1::SectorShape32GiB>(
         num_sectors,
-        porep_config,
+        c2_cores,
         parents_cache_filename,
         registered_proof,
         comm_d,
@@ -446,7 +499,7 @@ fn run_pipeline_32(num_sectors: usize) {
 }
 
 #[cfg(feature = "512MiB")]
-fn run_pipeline_512(num_sectors: usize) {
+fn run_pipeline_512(num_sectors: usize, c2_cores: &str) {
     let parents_cache_filename = "/var/tmp/filecoin-parents/v28-sdr-parent-016f31daba5a32c5933a4de666db8672051902808b79d51e9b97da39ac9981d3.cache";
 
     let comm_d: [u8;32] =  [  57,  86,  14, 123,  19, 169,  59,   7,
@@ -456,15 +509,9 @@ fn run_pipeline_512(num_sectors: usize) {
 
     let registered_proof = RegisteredSealProof::StackedDrg512MiBV1_1;
 
-    let arbitrary_porep_id = [99; 32];
-    let porep_config = PoRepConfig::new_groth16(
-        filecoin_proofs_v1::constants::SECTOR_SIZE_512_MIB,
-        arbitrary_porep_id,
-        ApiVersion::V1_1_0);
-
     run_pipeline::<filecoin_proofs_v1::SectorShape512MiB>(
         num_sectors,
-        porep_config,
+        c2_cores,
         parents_cache_filename,
         registered_proof,
         comm_d,
@@ -472,11 +519,16 @@ fn run_pipeline_512(num_sectors: usize) {
 }
 
 fn main() {
-    let num_sectors: usize = 32;
+    let num_sectors: usize = 128;
+    //let num_sectors: usize = 64;
+    //let num_sectors: usize = 32;
+
+    // Cores for C2 use, in a string that can be passed to taskset
+    let c2_cores = "4-7,45-47,48-63";
 
     #[cfg(feature = "32GiB")]
-    run_pipeline_32(num_sectors);
+    run_pipeline_32(num_sectors, c2_cores);
 
     #[cfg(feature = "512MiB")]
-    run_pipeline_512(num_sectors);
+    run_pipeline_512(num_sectors, c2_cores);
 }
