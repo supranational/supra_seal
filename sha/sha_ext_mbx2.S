@@ -8,12 +8,19 @@
 .SECTION .text
   .ALIGN  32
 
+.type   sha_ext_mbx2, @function
 sha_ext_mbx2:
-  .type   sha_ext_mbx2, @function
+.cfi_startproc
   endbr64
+  push    rbp
+.cfi_adjust_cfa_offset  8
+.cfi_offset             rbp,-16
+  mov     rbp, rsp
+.cfi_def_cfa_register   rbp
   push    r12
+.cfi_offset             r12,-24
   push    r13
-  mov     rax, rsp
+.cfi_offset             r13,-32
   sub     rsp, 64
   and     rsp, 0xFFFFFFFFFFFFFFF0
   movdqa  xmm1,  [FIRST_STATE+rip]
@@ -339,10 +346,8 @@ shaloop:
   mov     r13, r9
   mov     r11, rdx
   jmp     shaloop
-  .size   sha_ext_mbx2, . - sha_ext_mbx2
 
 done:
-  .type   done, @function
   movdqa  xmm3, xmm1
   movdqa  xmm4, xmm8
   punpckhdq xmm1, xmm2
@@ -360,13 +365,20 @@ done:
   movdqu   [rdi+0x10], xmm2
   movdqu   [rdi+0x20], xmm8
   movdqu   [rdi+0x30], xmm9
-  mov     rsp, rax
+  lea     rsp, [rbp-16]
   pop     r13
   pop     r12
+.cfi_restore            r13
+.cfi_restore            r12
+.cfi_def_cfa_register   rsp
+  pop     rbp
+.cfi_adjust_cfa_offset  -8
+.cfi_restore            rbp
   ret
+.cfi_endproc
+.size   sha_ext_mbx2, . - sha_ext_mbx2
 
-.SECTION .data
-  .ALIGN  16
+.SECTION .rodata
 
 .ALIGN  16
 FIRST_STATE:
@@ -414,5 +426,13 @@ CONSTANTS:
   .byte  0x14, 0x78, 0xC8, 0x84, 0x08, 0x02, 0xC7, 0x8C
   .byte  0xFA, 0xFF, 0xBE, 0x90, 0xEB, 0x6C, 0x50, 0xA4
   .byte  0xF7, 0xA3, 0xF9, 0xBE, 0xF2, 0x78, 0x71, 0xC6
+
+.section	.note.GNU-stack,"",@progbits
+.section	.note.gnu.property,"a",@note
+	.long	4,2f-1f,5
+	.byte	0x47,0x4E,0x55,0
+1:	.long	0xc0000002,4,3
+.align	8
+2:
 
 .att_syntax prefix
