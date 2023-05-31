@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index b5fd13d..f23f729 100644
+index b5fd13d..84bd015 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -36,6 +36,7 @@ blstrs = { version = "0.6.0", features = ["__private_bench"] }
@@ -7,9 +7,56 @@ index b5fd13d..f23f729 100644
  ec-gpu = { version = "0.2.0" }
  ec-gpu-gen = { version = "0.5.0" }
 +supraseal-c2 = { path = ".." }
-
+ 
  fs2 = { version = "0.4.3", optional = true }
-
+ 
+diff --git a/src/groth16/mapped_params.rs b/src/groth16/mapped_params.rs
+index ea3d051..8942e75 100644
+--- a/src/groth16/mapped_params.rs
++++ b/src/groth16/mapped_params.rs
+@@ -19,7 +19,7 @@ pub struct MappedParameters<E>
+ where
+     E: MultiMillerLoop,
+ {
+-    /// The parameter file we're reading from.  
++    /// The parameter file we're reading from.
+     pub param_file_path: PathBuf,
+     /// The file descriptor we have mmaped.
+     pub param_file: File,
+@@ -60,6 +60,10 @@ where
+     type G1Builder = (Arc<Vec<E::G1Affine>>, usize);
+     type G2Builder = (Arc<Vec<E::G2Affine>>, usize);
+ 
++    fn get_file_path(&self) -> PathBuf {
++        return self.param_file_path.clone();
++    }
++
+     fn get_vk(&self, _: usize) -> Result<&VerifyingKey<E>, SynthesisError> {
+         Ok(&self.vk)
+     }
+diff --git a/src/groth16/params.rs b/src/groth16/params.rs
+index 741d36b..147309f 100644
+--- a/src/groth16/params.rs
++++ b/src/groth16/params.rs
+@@ -412,6 +412,7 @@ where
+     type G1Builder: SourceBuilder<E::G1Affine>;
+     type G2Builder: SourceBuilder<E::G2Affine>;
+ 
++    fn get_file_path(&self) -> PathBuf;
+     fn get_vk(&self, num_ic: usize) -> Result<&VerifyingKey<E>, SynthesisError>;
+     fn get_h(&self, num_h: usize) -> Result<Self::G1Builder, SynthesisError>;
+     fn get_l(&self, num_l: usize) -> Result<Self::G1Builder, SynthesisError>;
+@@ -439,6 +440,10 @@ where
+     type G1Builder = (Arc<Vec<E::G1Affine>>, usize);
+     type G2Builder = (Arc<Vec<E::G2Affine>>, usize);
+ 
++    fn get_file_path(&self) -> PathBuf {
++        PathBuf::from("")
++    }
++
+     fn get_vk(&self, _: usize) -> Result<&VerifyingKey<E>, SynthesisError> {
+         Ok(&self.vk)
+     }
 diff --git a/src/groth16/proof.rs b/src/groth16/proof.rs
 index 0afb4f2..b076c89 100644
 --- a/src/groth16/proof.rs
@@ -17,13 +64,13 @@ index 0afb4f2..b076c89 100644
 @@ -9,6 +9,7 @@ use rayon::prelude::*;
  use serde::de::Visitor;
  use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
+ 
 +#[repr(C)]
  #[derive(Clone, Debug)]
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..2852974 100644
+index 49c3c20..dc8f3a2 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
 @@ -256,7 +256,12 @@ where
@@ -38,7 +85,7 @@ index 49c3c20..2852974 100644
 +        create_proof_batch_priority_inner_modified(circuits, params, None, priority)
 +    }
  }
-
+ 
  /// creates a batch of proofs where the randomization vector is already
 @@ -276,7 +281,12 @@ where
      E::G1Affine: GpuName,
@@ -52,9 +99,9 @@ index 49c3c20..2852974 100644
 +        create_proof_batch_priority_inner_modified(circuits, params, Some((r_s, s_s)), priority)
 +    }
  }
-
+ 
  #[allow(clippy::type_complexity)]
-@@ -786,3 +796,179 @@ mod tests {
+@@ -786,3 +796,178 @@ mod tests {
          }
      }
  }
@@ -74,6 +121,11 @@ index 49c3c20..2852974 100644
 +    E::G1Affine: GpuName,
 +    E::G2Affine: GpuName,
 +{
++    let srs = match supraseal_c2::SRS::try_new(params.get_file_path()) {
++        Ok(srs) => srs,
++        Err(err) => panic!("Failed to read SRS file with message: {}", String::from(err)),
++    };
++
 +    let (
 +        start,
 +        provers,
@@ -83,18 +135,11 @@ index 49c3c20..2852974 100644
 +
 +    let input_assignment_len = input_assignments_no_repr[0].len();
 +    let aux_assignment_len = aux_assignments_no_repr[0].len();
-+    let vk = params.get_vk(input_assignment_len)?.clone();
 +    let n = provers[0].a.len();
 +    let a_aux_density_total = provers[0].a_aux_density.get_total_density();
 +    let b_input_density_total = provers[0].b_input_density.get_total_density();
 +    let b_aux_density_total = provers[0].b_aux_density.get_total_density();
 +    let num_circuits = provers.len();
-+
-+    if (vk.delta_g1.is_identity() | vk.delta_g2.is_identity()).into() {
-+        // If this element is zero, someone is trying to perform a
-+        // subversion-CRS attack.
-+        return Err(SynthesisError::UnexpectedIdentity);
-+    }
 +
 +    let (r_s, s_s) = randomization.unwrap_or((
 +        vec![E::Fr::zero(); num_circuits],
@@ -162,6 +207,7 @@ index 49c3c20..2852974 100644
 +        r_s.as_slice(),
 +        s_s.as_slice(),
 +        proofs.as_mut_slice(),
++        &srs,
 +    );
 +
 +    let proof_time = start.elapsed();

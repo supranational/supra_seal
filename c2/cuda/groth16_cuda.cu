@@ -41,15 +41,6 @@ static void mult(point_t& ret, const affine_t point, const scalar_t& fr,
 
 static thread_pool_t groth16_pool;
 
-struct verifying_key {
-    affine_t alpha_g1;
-    affine_t beta_g1;
-    affine_fp2_t beta_g2;
-    affine_fp2_t gamma_g2;
-    affine_t delta_g1;
-    affine_fp2_t delta_g2;
-};
-
 struct msm_results {
     std::vector<point_t> h;
     std::vector<point_t> l;
@@ -70,233 +61,22 @@ struct groth16_proof {
     point_t::affine_t c;
 };
 
-
 #ifndef __CUDA_ARCH__
 
-extern "C" {
-    int blst_p1_deserialize(affine_t*, const byte[96]);
-    int blst_p2_deserialize(affine_fp2_t*, const byte[192]);
-}
-
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-
-// This class assumes that the SRS files used by filecoin have a specific file
-// layout and assumes some properties of data types that are present in the file
-//
-// There are 3 data types in the file:
-//     4-byte   big-endian unsigned integer,
-//     92-byte  BLS12-381 P1 affine point,
-//     192-byte BLS12-381 P2 affine point
-//
-// The layout of the file is as such, in order, without any padding:
-//
-// alpha_g1: g1 affine
-// beta_g1 : g1 affine
-// beta_g2 : g2 affine
-// gamma_g2: g2 affine
-// delta_g1: g1 affine
-// delta_g2: g2 affine
-// number of ic points: 4-byte big-endian unsigned integer
-// ic points: g1 affines
-// number of h points: 4-byte big-endian unsigned integer
-// h points: g1 affines
-// number of l points: 4-byte big-endian unsigned integer
-// l points: g1 affines
-// number of a points: 4-byte big-endian unsigned integer
-// a points: g1 affines
-// number of b_g1 points: 4-byte big-endian unsigned integer
-// b_g1 points: g1 affines
-// number of b_g2 points: 4-byte big-endian unsigned integer
-// b_g2 points: g2 affines
-class SRS {
-private:
-    // size of p1 affine and p2 affine points in the SRS file in bytes
-    static const size_t p1_affine_size = 96;
-    static const size_t p2_affine_size = 192;
-
-    // 3 p1 affine and 3 p2 affine points are in the verification key. 864 bytes
-    static const size_t vk_offset = p1_affine_size * 3 + p2_affine_size * 3;
-
-    // the number of points for each of h, l, a, b_g1 and b_g2 are stored as
-    // a big-endian uint32_t in the SRS file
-    static const size_t four_bytes = 4;
-
-    bool currently_initialized = false;
-
-    struct srs_data {
-        uint32_t size = 0;
-        size_t off = 0; // in bytes
-    };
-
-    template<typename T>
-    static T from_big_endian(const unsigned char* ptr) {
-        T res = ptr[0];
-        for (size_t i = 1; i < sizeof(T); i++) {
-            res <<= 8;
-            res |= ptr[i];
-        }
-
-        return res;
-    }
-
-    static size_t get_batch_size(uint32_t num_points, size_t num_threads) {
-        size_t batch_size = (num_points + num_threads - 1) / num_threads;
-        batch_size = (batch_size + 64 - 1) / 64;
-        return batch_size;
-    }
-
-    void read_g1_points(affine_t* points, const byte* srs_ptr,
-                        uint32_t num_points = 1)
-    {
-        size_t batch_size = get_batch_size(num_points, groth16_pool.size());
-
-        const byte (*srs)[p1_affine_size] =
-            reinterpret_cast<decltype(srs)>(srs_ptr);
-
-        groth16_pool.par_map(num_points, batch_size, [&](size_t i) {
-            blst_p1_deserialize(&points[i], srs[i]);
-        });
-    }
-
-    void read_g2_points(affine_fp2_t* points, const byte* srs_ptr,
-                        uint32_t num_points = 1)
-    {
-        size_t batch_size = get_batch_size(num_points, groth16_pool.size());
-
-        const byte (*srs)[p2_affine_size] =
-            reinterpret_cast<decltype(srs)>(srs_ptr);
-
-        groth16_pool.par_map(num_points, batch_size, [&](size_t i) {
-            blst_p2_deserialize(&points[i], srs[i]);
-        });
-    }
-
-    srs_data data_h, data_l, data_a, data_b_g1, data_b_g2;
-
-    SRS() {}
-
-public:
-    static SRS& get_instance() {
-        static SRS instance;
-        return instance;
-    }
-
-    SRS(SRS const&)            = delete;
-    void operator=(SRS const&) = delete;
-
-    verifying_key vk;
-    std::vector<affine_t> h, l, a, b_g1;
-    std::vector<affine_fp2_t> b_g2;
-
-    // in case one wants to deallocate before program's end
-    void reset() {
-        if (!currently_initialized)
-            return;
-
-        h = std::vector<affine_t>();
-        l = std::vector<affine_t>();
-        a = std::vector<affine_t>();
-        b_g1 = std::vector<affine_t>();
-        b_g2 = std::vector<affine_fp2_t>();
-
-        currently_initialized = false;
-    }
-
-    void read(const char* srs_path) {
-        if (currently_initialized)
-            reset();
-
-        int srs_file = open(srs_path, O_RDONLY);
-
-        struct stat st;
-        fstat(srs_file, &st);
-        size_t file_size = st.st_size;
-
-        const byte* srs_ptr = (const byte*)mmap(NULL, file_size, PROT_READ,
-                                                MAP_PRIVATE, srs_file, 0);
-        close(srs_file);
-
-        read_g1_points(&vk.alpha_g1, srs_ptr + 0);
-        read_g1_points(&vk.beta_g1, srs_ptr + p1_affine_size);
-        read_g2_points(&vk.beta_g2, srs_ptr + 2 * p1_affine_size);
-        read_g2_points(&vk.gamma_g2, srs_ptr + 2 * p1_affine_size +
-                                                   p2_affine_size);
-        read_g1_points(&vk.delta_g1, srs_ptr + 2 * p1_affine_size +
-                                               2 * p2_affine_size);
-        read_g2_points(&vk.delta_g2, srs_ptr + 3 * p1_affine_size +
-                                               2 * p2_affine_size);
-
-        uint32_t vk_ic_size = from_big_endian<uint32_t>(srs_ptr + vk_offset);
-
-        data_h.size = from_big_endian<uint32_t>(srs_ptr + vk_offset +
-                                                four_bytes +
-                                                vk_ic_size * p1_affine_size);
-        data_h.off = vk_offset + four_bytes + vk_ic_size * p1_affine_size +
-                     four_bytes;
-
-        data_l.size = from_big_endian<uint32_t>(srs_ptr + data_h.off +
-                                                data_h.size * p1_affine_size);
-        data_l.off = data_h.off + data_h.size * p1_affine_size + four_bytes;
-
-        data_a.size = from_big_endian<uint32_t>(srs_ptr + data_l.off +
-                                                data_l.size * p1_affine_size);
-        data_a.off = data_l.off + data_l.size * p1_affine_size + four_bytes;
-
-        data_b_g1.size = from_big_endian<uint32_t>(srs_ptr + data_a.off +
-                                                   data_a.size *
-                                                   p1_affine_size);
-        data_b_g1.off = data_a.off + data_a.size * p1_affine_size + four_bytes;
-
-        data_b_g2.size = from_big_endian<uint32_t>(srs_ptr + data_b_g1.off +
-                                                   data_b_g1.size *
-                                                   p1_affine_size);
-        data_b_g2.off = data_b_g1.off + data_b_g1.size * p1_affine_size +
-                        four_bytes;
-
-        h.resize(data_h.size);
-        l.resize(data_l.size);
-        a.resize(data_a.size);
-        b_g1.resize(data_b_g1.size);
-        b_g2.resize(data_b_g2.size);
-
-        read_g1_points(&h[0], srs_ptr + data_h.off, data_h.size);
-        read_g1_points(&l[0], srs_ptr + data_l.off, data_l.size);
-        read_g1_points(&a[0], srs_ptr + data_a.off, data_a.size);
-        read_g1_points(&b_g1[0], srs_ptr + data_b_g1.off, data_b_g1.size);
-        read_g2_points(&b_g2[0], srs_ptr + data_b_g2.off, data_b_g2.size);
-
-        munmap(const_cast<byte*>(srs_ptr), file_size);
-
-        currently_initialized = true;
-    }
-};
-
-extern "C"
-void read_srs_c(const char* srs_path) {
-    SRS::get_instance().read(srs_path);
-}
-
-extern "C"
-void reset_srs_c() {
-    SRS::get_instance().reset();
-}
+#include "groth16_srs.cuh"
 
 extern "C"
 RustError generate_groth16_proof_c(ntt_msm_h_inputs_c& ntt_msm_h_inputs,
     msm_l_a_b_g1_b_g2_inputs_c& msm_l_a_b_g1_b_g2_inputs, size_t num_circuits,
-    const fr_t r_s[], const fr_t s_s[], groth16_proof proofs[])
+    const fr_t r_s[], const fr_t s_s[], groth16_proof proofs[], SRS& srs)
 {
-    SRS& srs = SRS::get_instance();
-    verifying_key* vk = &srs.vk;
+    const verifying_key* vk = &srs.get_vk();
 
-    ntt_msm_h_inputs.points_h = &srs.h[0];
-    msm_l_a_b_g1_b_g2_inputs.points_l.points = &srs.l[0];
-    msm_l_a_b_g1_b_g2_inputs.points_a.points = &srs.a[0];
-    msm_l_a_b_g1_b_g2_inputs.points_b_g1.points = &srs.b_g1[0];
-    msm_l_a_b_g1_b_g2_inputs.points_b_g2.points = &srs.b_g2[0];
+    ntt_msm_h_inputs.points_h = srs.get_h().data();
+    msm_l_a_b_g1_b_g2_inputs.points_l.points = srs.get_l().data();
+    msm_l_a_b_g1_b_g2_inputs.points_a.points = srs.get_a().data();
+    msm_l_a_b_g1_b_g2_inputs.points_b_g1.points = srs.get_b_g1().data();
+    msm_l_a_b_g1_b_g2_inputs.points_b_g2.points = srs.get_b_g2().data();
 
     const points_c<affine_t>& points_l = msm_l_a_b_g1_b_g2_inputs.points_l;
     const points_c<affine_t>& points_a = msm_l_a_b_g1_b_g2_inputs.points_a;

@@ -2,6 +2,43 @@
 
 sppark::cuda_error!();
 
+use std::path::PathBuf;
+
+#[repr(C)]
+pub struct SRS {
+    ptr: *const core::ffi::c_void,
+}
+
+impl SRS {
+    pub fn try_new(srs_path: PathBuf) -> Result<Self, cuda::Error> {
+        extern "C" {
+            fn create_SRS(srs_path: *const std::os::raw::c_char) -> SRS;
+        }
+        let c_srs_path = std::ffi::CString::new(srs_path.to_str().unwrap()).unwrap();
+
+        Ok(unsafe { create_SRS(c_srs_path.as_ptr()) })
+    }
+}
+
+impl Drop for SRS {
+    fn drop(&mut self) {
+        extern "C" {
+            fn drop_SRS(by_ref: &SRS);
+        }
+        unsafe { drop_SRS(self) };
+        self.ptr = core::ptr::null();
+    }
+}
+
+impl Clone for SRS {
+    fn clone(&self) -> Self {
+        extern "C" {
+            fn clone_SRS(by_ref: &SRS) -> SRS;
+        }
+        unsafe { clone_SRS(self) }
+    }
+}
+
 #[repr(C)]
 struct points_c {
     points: *mut core::ffi::c_void,
@@ -41,21 +78,8 @@ extern "C" {
         r_s: *const core::ffi::c_void,
         s_s: *const core::ffi::c_void,
         proofs: *mut core::ffi::c_void,
+        srs: &SRS,
     ) -> cuda::Error;
-
-    fn read_srs_c(srs_path: *const std::os::raw::c_char);
-
-    fn reset_srs_c();
-}
-
-pub fn read_srs(srs_path: String) {
-    let c_srs_path = std::ffi::CString::new(srs_path).unwrap();
-
-    unsafe { read_srs_c(c_srs_path.as_ptr()) };
-}
-
-pub fn reset_srs() {
-    unsafe { reset_srs_c() };
 }
 
 pub fn generate_groth16_proof<S, D, PR>(
@@ -75,6 +99,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     r_s: &[S],
     s_s: &[S],
     proofs: &mut [PR],
+    srs: &SRS,
 ) {
     let lg_domain_size = (std::mem::size_of::<usize>() * 8) as u32 - (ntt_scalars_actual_size - 1).leading_zeros();
 
@@ -141,6 +166,7 @@ pub fn generate_groth16_proof<S, D, PR>(
             r_s.as_ptr() as *const core::ffi::c_void,
             s_s.as_ptr() as *const core::ffi::c_void,
             proofs.as_mut_ptr() as *mut core::ffi::c_void,
+            srs,
         )
     };
 

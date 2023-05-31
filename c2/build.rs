@@ -11,6 +11,7 @@ fn groth16_cuda() {
     nvcc.cuda(true);
     nvcc.flag("-arch=sm_80");
     nvcc.flag("-gencode").flag("arch=compute_70,code=sm_70");
+    nvcc.flag("-t0");
     nvcc.define("TAKE_RESPONSIBILITY_FOR_ERROR_MESSAGE", None);
     nvcc.define(curve_feature, None);
     apply_blst_flags(&mut nvcc);

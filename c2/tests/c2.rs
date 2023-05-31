@@ -1,7 +1,5 @@
 // Copyright Supranational LLC
 
-use supraseal_c2;
-
 const COMMIT_PHASE1_OUTPUT_FILE: &str = "resources/test/commit-phase1-output";
 
 use anyhow::Context;
@@ -14,7 +12,6 @@ use filecoin_proofs_api::SectorId;
 use filecoin_proofs_v1::{
     seal_commit_phase2, verify_seal, PoRepConfig, SealCommitPhase1Output,
     SectorShape32GiB,
-    caches::get_stacked_params,
     constants::SECTOR_SIZE_32_GIB,
 };
 use storage_proofs_core::api_version::ApiVersion;
@@ -51,13 +48,6 @@ fn run_seal() {
     let porep_config =
         PoRepConfig::new_groth16(SECTOR_SIZE_32_GIB, arbitrary_porep_id,
                                  ApiVersion::V1_1_0);
-    let groth_params =
-        get_stacked_params::<SectorShape32GiB>(porep_config).unwrap();
-    let param_file_path =
-        groth_params.param_file_path.to_str().unwrap().to_string();
-
-    println!("Reading SRS file {}", param_file_path);
-    supraseal_c2::read_srs(param_file_path);
 
     let SealCommitPhase1Output {
         vanilla_proofs: _,
