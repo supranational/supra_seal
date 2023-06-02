@@ -124,16 +124,13 @@ int main(int argc, char* argv[]) {
   }
   
 #ifdef __NVCC__
-  if (ngpus() == 0) {
-    TreeR tree_r;
-    tree_r.BuildTreeR(last_layer_filename, data_filename, out_dir, cores);
-  } else {
+  if (ngpus()) {
     gpu_tree_r(config_filename, last_layer_filename, data_filename, out_dir);
+    return 0;
   }
-#else
+#endif
   TreeR tree_r;
   tree_r.BuildTreeR(last_layer_filename, data_filename, out_dir, cores);
-#endif
   return 0;
 }
 #endif

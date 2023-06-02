@@ -8,13 +8,13 @@
 #include <iostream>
 #include "poseidon.hpp"
 
-#include "../../obj/constants_2.h"
-#include "../../obj/constants_4.h"
-#include "../../obj/constants_8.h"
-#include "../../obj/constants_11.h"
-#include "../../obj/constants_16.h"
-#include "../../obj/constants_24.h"
-#include "../../obj/constants_36.h"
+#include "../obj/constants_2.h"
+#include "../obj/constants_4.h"
+#include "../obj/constants_8.h"
+#include "../obj/constants_11.h"
+#include "../obj/constants_16.h"
+#include "../obj/constants_24.h"
+#include "../obj/constants_36.h"
 
 Poseidon::Poseidon(const int arity) :
   arity_(arity),
