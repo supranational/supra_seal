@@ -16,11 +16,13 @@ NVCC=${NVCC:-nvcc}
 
 CUDA=$(dirname $(dirname $(which $NVCC)))
 SPDK="deps/spdk-v22.09"
-CUDA_ARCH="-arch=sm_80 -gencode arch=compute_70,code=sm_70"
+CUDA_ARCH="-arch=sm_80 -gencode arch=compute_70,code=sm_70 -t0"
+CXXSTD=`$CXX -dM -E -x c++ /dev/null | \
+        awk '{ if($2=="__cplusplus" && $3<"2017") print "-std=c++17"; }'`
 
 INCLUDE="-I$SPDK/include -I$SPDK/isa-l/.. -I$SPDK/dpdk/build/include"
 CFLAGS="$SECTOR_SIZE -g -O2 $INCLUDE -D__ADX__"
-CPPFLAGS="$CFLAGS \
+CXXFLAGS="$CFLAGS $CXXSTD \
           -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter \
           -Wno-missing-field-initializers -fno-strict-aliasing \
           -march=native -Wformat -Wformat-security \
@@ -148,11 +150,11 @@ xxd -i poseidon/constants/constants_24 > obj/constants_24.h
 xxd -i poseidon/constants/constants_36 > obj/constants_36.h
 
 # PC1
-$CXX $CPPFLAGS -Ideps/sppark/util -o obj/pc1.o -c pc1/pc1.cpp &
+$CXX $CXXFLAGS -Ideps/sppark/util -o obj/pc1.o -c pc1/pc1.cpp &
 
 # PC2
-$CXX $CPPFLAGS -o obj/streaming_node_reader_nvme.o -c nvme/streaming_node_reader_nvme.cpp &
-$CXX $CPPFLAGS -o obj/ring_t.o -c nvme/ring_t.cpp &
+$CXX $CXXFLAGS -o obj/streaming_node_reader_nvme.o -c nvme/streaming_node_reader_nvme.cpp &
+$CXX $CXXFLAGS -o obj/ring_t.o -c nvme/ring_t.cpp &
 $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
       -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dc pc2/cuda/pc2.cu -o obj/pc2.o &
 $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
@@ -160,7 +162,7 @@ $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage 
 
 $CXX -g -O2 -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
 
-$CXX $CPPFLAGS $INCLUDE -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
+$CXX $CXXFLAGS $INCLUDE -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
     -c sealing/supra_seal.cpp -o obj/supra_seal.o -Wno-subobject-linkage &
 
 wait
@@ -175,25 +177,25 @@ ar rvs obj/libsupraseal.a \
    obj/sector_parameters.o \
    obj/sha_ext_mbx2.o
 
-$CXX $CPPFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
+$CXX $CXXFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
     -o bin/seal demos/main.cpp \
     -Lobj -lsupraseal \
     $LDFLAGS -Ldeps/blst -lblst -L$CUDA/lib64 -lcudart_static -lgmp -lconfig++ &
 
-$CXX -DSECTOR_SIZE_512MiB -g -O3 -march=native \
+$CXX $CXXSTD -pthread -DSECTOR_SIZE_512MiB -g -O3 -march=native \
     -Wno-subobject-linkage \
     tools/c1.cpp sealing/sector_parameters.cpp util/debug_helpers.cpp \
     -o bin/c1 -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst -lgmp &
 
 # tree-r CPU only
-$CXX -g -O3 -march=native \
+$CXX $CXXSTD -pthread -g -O3 -march=native \
     -Wall -Wextra -Werror -Wno-subobject-linkage \
     tools/tree_r.cpp \
     -o bin/tree_r_cpu -Iposeidon -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst &
 
 # tree-r CPU + GPU
 $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
-     -g -O3 -Xcompiler -march=native \
+     $CUDA_ARCH -std=c++17 -g -O3 -Xcompiler -march=native \
      -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
      -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
      -x cu tools/tree_r.cpp -o bin/tree_r \
