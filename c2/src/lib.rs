@@ -39,6 +39,8 @@ impl Clone for SRS {
     }
 }
 
+unsafe impl Sync for SRS {}
+
 #[repr(C)]
 struct points_c {
     points: *mut core::ffi::c_void,
