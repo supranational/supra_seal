@@ -123,11 +123,10 @@ uint32_t bswap(uint32_t a)
 }
 
 __device__ __forceinline__
-void bswap(fr_t* a)
+void bswap(fr_t& a)
 {
-  uint32_t* a32 = (uint32_t*)a;
-  for (int i = 0; i < sizeof(fr_t) / sizeof(uint32_t); i++) {
-    a32[i] = bswap(a32[i]);
+  for (int i = 0; i < a.len(); i++) {
+    a[i] = bswap(a[i]);
   }
 }
 
@@ -263,7 +262,7 @@ void poseidon_hash_1_0(in_ptrs_d<ARITY_DT - 1> in_ptrs, fr_t* aux_ptr, const fr_
         }
         element = in_ptr[element_index];
         if (do_bswap) {
-          bswap(&element);
+          bswap(element);
         }
       } else {
         // Access element from a packed array (no domain tag)

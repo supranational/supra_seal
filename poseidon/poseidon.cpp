@@ -95,7 +95,7 @@ void Poseidon::AssignPointers(fr_t* constants_file,
 }
 
 void Poseidon::Hash(uint8_t* out, const uint8_t* in) {
-  fr_t* elements = static_cast<fr_t*>(malloc(sizeof(fr_t) * t_));
+  fr_t elements[t_];
 
   elements[0] = domain_tag_;
 
@@ -125,8 +125,6 @@ void Poseidon::Hash(uint8_t* out, const uint8_t* in) {
   LastFullRound(elements, mds_matrix_);
 
   elements[1].to_scalar(*((fr_t::pow_t*)out));
-
-  free(elements);
 }
 
 void Poseidon::QuinticSBox(fr_t& element, const fr_t& round_constant) {
@@ -135,7 +133,7 @@ void Poseidon::QuinticSBox(fr_t& element, const fr_t& round_constant) {
 }
 
 void Poseidon::MatrixMul(fr_t* elements, const fr_t* matrix) {
-  fr_t* tmp = static_cast<fr_t*>(malloc(sizeof(fr_t) * t_));
+  fr_t tmp[t_];
 
   for (int i = 0; i < t_; ++i) {
     tmp[i] = elements[0] * matrix[i];
@@ -148,8 +146,6 @@ void Poseidon::MatrixMul(fr_t* elements, const fr_t* matrix) {
   for (int i = 0; i < t_; ++i) {
     elements[i] = tmp[i];
   }
-
-  free(tmp);
 }
 
 void Poseidon::SparseMatrixMul(fr_t* elements, const fr_t* sparse_matrix) {
