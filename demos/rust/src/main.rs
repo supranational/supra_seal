@@ -11,7 +11,6 @@ use filecoin_proofs_api::{RegisteredSealProof, SectorId};
 use filecoin_proofs_v1::{
     PoRepConfig, ProverId, seal_commit_phase2, SealCommitPhase1Output,
     Ticket, verify_seal,
-    caches::get_stacked_params,
 };
 
 use sha2::{Digest, Sha256};
@@ -207,15 +206,6 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     let num_slots = 2; // This matches mutex array below
     let slot_counter = Arc::new([Mutex::new(0), Mutex::new(0)]);
     let mut pipelines = vec![];
-
-    let groth_params =
-        get_stacked_params::<Tree>(porep_config).unwrap();
-
-    let param_file_path =
-        groth_params.param_file_path.to_str().unwrap().to_string();
-
-    println!("Reading SRS file {}", param_file_path);
-    supraseal_c2::read_srs(param_file_path);
 
     // Demonstrate three passes through the pipeline
     // Batch 0  PC1  PC2   C1   C2

@@ -111,6 +111,7 @@ fn main() {
     println!("cargo:rustc-link-arg=-lcrypto");
     println!("cargo:rustc-link-arg=-lm");
     println!("cargo:rustc-link-arg=-laio");
+    println!("cargo:rustc-link-arg=-lc");
     println!("cargo:rustc-link-arg=-lgcc");
 
     println!("cargo:rustc-link-lib=supraseal");
