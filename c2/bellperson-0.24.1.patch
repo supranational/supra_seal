@@ -70,38 +70,36 @@ index 0afb4f2..b076c89 100644
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..aed2304 100644
+index 49c3c20..c2a0f59 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
-@@ -256,7 +256,12 @@ where
+@@ -256,7 +256,11 @@ where
      E::G1Affine: GpuName,
      E::G2Affine: GpuName,
  {
 -    create_proof_batch_priority_inner(circuits, params, None, priority)
 +    if circuits.len() == 1 {
 +        create_proof_batch_priority_inner(circuits, params, None, priority)
-+    }
-+    else {
++    } else {
 +        create_proof_batch_priority_inner_modified(circuits, params, None, priority)
 +    }
  }
  
  /// creates a batch of proofs where the randomization vector is already
-@@ -276,7 +281,12 @@ where
+@@ -276,7 +280,11 @@ where
      E::G1Affine: GpuName,
      E::G2Affine: GpuName,
  {
 -    create_proof_batch_priority_inner(circuits, params, Some((r_s, s_s)), priority)
 +    if circuits.len() == 1 {
 +        create_proof_batch_priority_inner(circuits, params, Some((r_s, s_s)), priority)
-+    }
-+    else {
++    } else {
 +        create_proof_batch_priority_inner_modified(circuits, params, Some((r_s, s_s)), priority)
 +    }
  }
  
  #[allow(clippy::type_complexity)]
-@@ -786,3 +796,178 @@ mod tests {
+@@ -786,3 +794,178 @@ mod tests {
          }
      }
  }
@@ -123,15 +121,14 @@ index 49c3c20..aed2304 100644
 +{
 +    let srs = match supraseal_c2::SRS::try_new(params.get_file_path()) {
 +        Ok(srs) => srs,
-+        Err(err) => panic!("Failed to read SRS file with message: {}", String::from(err)),
++        Err(err) => panic!(
++            "Failed to read SRS file with message: {}",
++            String::from(err)
++        ),
 +    };
 +
-+    let (
-+        start,
-+        provers,
-+        input_assignments_no_repr,
-+        aux_assignments_no_repr,
-+    ) = synthesize_circuits_batch_modified(circuits)?;
++    let (start, provers, input_assignments_no_repr, aux_assignments_no_repr) =
++        synthesize_circuits_batch_modified(circuits)?;
 +
 +    let input_assignment_len = input_assignments_no_repr[0].len();
 +    let aux_assignment_len = aux_assignments_no_repr[0].len();
@@ -173,7 +170,8 @@ index 49c3c20..aed2304 100644
 +    let mut input_assignments_ref = Vec::with_capacity(num_circuits);
 +    let mut aux_assignments_ref = Vec::with_capacity(num_circuits);
 +    for i in 0..num_circuits {
-+        input_assignments_ref.push(input_assignments_no_repr[i].as_ptr() as *const _ as *const E::Fr);
++        input_assignments_ref
++            .push(input_assignments_no_repr[i].as_ptr() as *const _ as *const E::Fr);
 +        aux_assignments_ref.push(aux_assignments_no_repr[i].as_ptr() as *const _ as *const E::Fr);
 +    }
 +
@@ -188,7 +186,7 @@ index 49c3c20..aed2304 100644
 +    }
 +
 +    let mut proofs: Vec<Proof<E>> = Vec::with_capacity(num_circuits);
-+    unsafe { proofs.set_len(num_circuits); }
++    unsafe { proofs.set_len(num_circuits) };
 +
 +    supraseal_c2::generate_groth16_proof(
 +        a_ref.as_slice(),
