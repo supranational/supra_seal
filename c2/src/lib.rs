@@ -44,7 +44,7 @@ unsafe impl Send for SRS {}
 
 #[repr(C)]
 struct points_c {
-    points: *mut core::ffi::c_void,
+    points: Option<core::ptr::NonNull<i8>>,
     size: usize,
     skip: usize,
     density_map: *const core::ffi::c_void,
@@ -53,7 +53,7 @@ struct points_c {
 
 #[repr(C)]
 struct ntt_msm_h_inputs_c {
-    h: *mut core::ffi::c_void,
+    h: *const core::ffi::c_void,
     a: *const core::ffi::c_void,
     b: *const core::ffi::c_void,
     c: *const core::ffi::c_void,
@@ -110,7 +110,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     assert!(bv_element_size == 64, "only 64-bit elements in bit vectors are supported");
 
     let mut ntt_msm_h_inputs = ntt_msm_h_inputs_c {
-        h: std::ptr::null::<u8>() as *mut core::ffi::c_void,
+        h: std::ptr::null::<u8>() as *const core::ffi::c_void,
         a: ntt_a_scalars.as_ptr() as *const core::ffi::c_void,
         b: ntt_b_scalars.as_ptr() as *const core::ffi::c_void,
         c: ntt_c_scalars.as_ptr() as *const core::ffi::c_void,
@@ -119,7 +119,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_l = points_c {
-        points: std::ptr::null::<u8>() as *mut core::ffi::c_void,
+        points: None,
         size: aux_assignments_size,
         skip: 0usize,
         density_map: std::ptr::null() as *const core::ffi::c_void, // l always has FullDensity
@@ -127,7 +127,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_a = points_c {
-         points: std::ptr::null::<u8>() as *mut core::ffi::c_void,
+         points: None,
          size: a_aux_total_density + input_assignments_size,
          skip: input_assignments_size,
          density_map: a_aux_density_bv.as_ptr() as *const core::ffi::c_void,
@@ -135,7 +135,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_b_g1 = points_c {
-         points: std::ptr::null::<u8>() as *mut core::ffi::c_void,
+         points: None,
          size: b_g1_aux_total_density + 1,
          skip: 1,
          density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
@@ -143,7 +143,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_b_g2 = points_c {
-         points: std::ptr::null::<u8>() as *mut core::ffi::c_void,
+         points: None,
          size: b_g1_aux_total_density + 1,
          skip: 1,
          density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,

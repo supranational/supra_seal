@@ -19,7 +19,7 @@ struct points_c {
     const affine_t* points;
     size_t size;
     size_t skip;
-    uint64_t* density_map;
+    const uint64_t* density_map;
     size_t total_density;
 
     inline const affine_t& operator[](size_t i) const { return points[i]; }
