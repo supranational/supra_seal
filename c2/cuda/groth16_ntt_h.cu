@@ -28,7 +28,7 @@ __global__ void sub_mult_with_constant(fr_t* a, const fr_t* c, fr_t z,
 #ifndef __CUDA_ARCH__
 
 struct ntt_msm_h_inputs_c {
-    const affine_t* points_h;
+    mutable const affine_t* points_h;
     const fr_t** a;
     const fr_t** b;
     const fr_t** c;

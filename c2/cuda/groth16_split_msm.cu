@@ -16,7 +16,7 @@ void batch_addition<bucket_fp2_t>(bucket_fp2_t::mem_t ret_[],
 
 template<class affine_t>
 struct points_c {
-    const affine_t* points;
+    mutable const affine_t* points;
     size_t size;
     size_t skip;
     const uint64_t* density_map;

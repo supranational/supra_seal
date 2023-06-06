@@ -70,7 +70,7 @@ index 0afb4f2..b076c89 100644
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..dc8f3a2 100644
+index 49c3c20..aed2304 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
 @@ -256,7 +256,12 @@ where
@@ -195,8 +195,8 @@ index 49c3c20..dc8f3a2 100644
 +        b_ref.as_slice(),
 +        c_ref.as_slice(),
 +        provers[0].a.len(),
-+        input_assignments_ref.as_mut_slice(),
-+        aux_assignments_ref.as_mut_slice(),
++        input_assignments_ref.as_slice(),
++        aux_assignments_ref.as_slice(),
 +        input_assignment_len,
 +        aux_assignment_len,
 +        &provers[0].a_aux_density.bv.as_raw_slice().to_vec(),

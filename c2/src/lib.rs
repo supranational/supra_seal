@@ -44,7 +44,7 @@ unsafe impl Send for SRS {}
 
 #[repr(C)]
 struct points_c {
-    points: Option<core::ptr::NonNull<i8>>,
+    points: core::cell::Cell<Option<core::ptr::NonNull<i8>>>,
     size: usize,
     skip: usize,
     density_map: *const core::ffi::c_void,
@@ -53,7 +53,7 @@ struct points_c {
 
 #[repr(C)]
 struct ntt_msm_h_inputs_c {
-    h: *const core::ffi::c_void,
+    h: core::cell::Cell<Option<core::ptr::NonNull<i8>>>,
     a: *const core::ffi::c_void,
     b: *const core::ffi::c_void,
     c: *const core::ffi::c_void,
@@ -75,8 +75,8 @@ struct msm_l_a_b_g1_b_g2_inputs_c {
 
 extern "C" {
     fn generate_groth16_proof_c(
-        ntt_msm_h_inputs: &mut ntt_msm_h_inputs_c,
-        msm_l_a_b_g1_b_g2_inputs: &mut msm_l_a_b_g1_b_g2_inputs_c,
+        ntt_msm_h_inputs: &ntt_msm_h_inputs_c,
+        msm_l_a_b_g1_b_g2_inputs: &msm_l_a_b_g1_b_g2_inputs_c,
         num_circuits: usize,
         r_s: *const core::ffi::c_void,
         s_s: *const core::ffi::c_void,
@@ -90,8 +90,8 @@ pub fn generate_groth16_proof<S, D, PR>(
     ntt_b_scalars: &[*const S],
     ntt_c_scalars: &[*const S],
     ntt_scalars_actual_size: usize,
-    input_assignments: &mut [*const S],
-    aux_assignments: &mut [*const S],
+    input_assignments: &[*const S],
+    aux_assignments: &[*const S],
     input_assignments_size: usize,
     aux_assignments_size: usize,
     a_aux_density_bv: &[D],
@@ -109,8 +109,8 @@ pub fn generate_groth16_proof<S, D, PR>(
     let bv_element_size: usize = std::mem::size_of::<D>() * 8; // length of D in bits
     assert!(bv_element_size == 64, "only 64-bit elements in bit vectors are supported");
 
-    let mut ntt_msm_h_inputs = ntt_msm_h_inputs_c {
-        h: std::ptr::null::<u8>() as *const core::ffi::c_void,
+    let ntt_msm_h_inputs = ntt_msm_h_inputs_c {
+        h: None.into(),
         a: ntt_a_scalars.as_ptr() as *const core::ffi::c_void,
         b: ntt_b_scalars.as_ptr() as *const core::ffi::c_void,
         c: ntt_c_scalars.as_ptr() as *const core::ffi::c_void,
@@ -119,7 +119,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_l = points_c {
-        points: None,
+        points: None.into(),
         size: aux_assignments_size,
         skip: 0usize,
         density_map: std::ptr::null() as *const core::ffi::c_void, // l always has FullDensity
@@ -127,7 +127,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_a = points_c {
-         points: None,
+         points: None.into(),
          size: a_aux_total_density + input_assignments_size,
          skip: input_assignments_size,
          density_map: a_aux_density_bv.as_ptr() as *const core::ffi::c_void,
@@ -135,7 +135,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_b_g1 = points_c {
-         points: None,
+         points: None.into(),
          size: b_g1_aux_total_density + 1,
          skip: 1,
          density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
@@ -143,14 +143,14 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_b_g2 = points_c {
-         points: None,
+         points: None.into(),
          size: b_g1_aux_total_density + 1,
          skip: 1,
          density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
          total_density: b_g1_aux_total_density,
     };
 
-    let mut msm_l_a_b_g1_b_g2_inputs = msm_l_a_b_g1_b_g2_inputs_c {
+    let msm_l_a_b_g1_b_g2_inputs = msm_l_a_b_g1_b_g2_inputs_c {
         points_l: points_l,
         points_a: points_a,
         points_b_g1: points_b_g1,
@@ -163,8 +163,8 @@ pub fn generate_groth16_proof<S, D, PR>(
 
     let err = unsafe {
         generate_groth16_proof_c(
-            &mut ntt_msm_h_inputs,
-            &mut msm_l_a_b_g1_b_g2_inputs,
+            &ntt_msm_h_inputs,
+            &msm_l_a_b_g1_b_g2_inputs,
             num_circuits,
             r_s.as_ptr() as *const core::ffi::c_void,
             s_s.as_ptr() as *const core::ffi::c_void,

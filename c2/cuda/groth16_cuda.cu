@@ -66,8 +66,8 @@ struct groth16_proof {
 #include "groth16_srs.cuh"
 
 extern "C"
-RustError generate_groth16_proof_c(ntt_msm_h_inputs_c& ntt_msm_h_inputs,
-    msm_l_a_b_g1_b_g2_inputs_c& msm_l_a_b_g1_b_g2_inputs, size_t num_circuits,
+RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
+    const msm_l_a_b_g1_b_g2_inputs_c& msm_l_a_b_g1_b_g2_inputs, size_t num_circuits,
     const fr_t r_s[], const fr_t s_s[], groth16_proof proofs[], SRS& srs)
 {
     const verifying_key* vk = &srs.get_vk();
