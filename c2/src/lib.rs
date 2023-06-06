@@ -40,6 +40,7 @@ impl Clone for SRS {
 }
 
 unsafe impl Sync for SRS {}
+unsafe impl Send for SRS {}
 
 #[repr(C)]
 struct points_c {
