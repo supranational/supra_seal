@@ -65,6 +65,10 @@ struct groth16_proof {
 
 #include "groth16_srs.cuh"
 
+#if defined(_MSC_VER) && !defined(__clang__) && !defined(__builtin_popcountll)
+#define __builtin_popcountll(x) __popcnt64(x)
+#endif
+
 extern "C"
 RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
     const msm_l_a_b_g1_b_g2_inputs_c& msm_l_a_b_g1_b_g2_inputs, size_t num_circuits,
@@ -106,45 +110,108 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
         const points_c<affine_t>& points_b_g1 = msm_l_a_b_g1_b_g2_inputs.points_b_g1;
         const points_c<affine_fp2_t>& points_b_g2 = msm_l_a_b_g1_b_g2_inputs.points_b_g2;
 #endif
-        const fr_t** input_assignments = msm_l_a_b_g1_b_g2_inputs.input_assignments;
+        const fr_t** inp_assignments = msm_l_a_b_g1_b_g2_inputs.input_assignments;
         const fr_t** aux_assignments = msm_l_a_b_g1_b_g2_inputs.aux_assignments;
 
-        size_t input_assignment_size = msm_l_a_b_g1_b_g2_inputs.input_assignment_size;
-        size_t aux_assignment_size = msm_l_a_b_g1_b_g2_inputs.aux_assignment_size;
+        size_t inp_size = msm_l_a_b_g1_b_g2_inputs.input_assignment_size;
+        size_t aux_size = msm_l_a_b_g1_b_g2_inputs.aux_assignment_size;
 
         // pre-processing step
-        const fr_t* input_assignment0 = input_assignments[0];
-        const fr_t* aux_assignment0 = aux_assignments[0];
+        // mark all significant scalars in each aux_assignment
+        groth16_pool.par_map(num_circuits, [&, aux_size](size_t c) {
+            auto& l_bit_vector = split_vectors_l.bit_vector[c];
+            auto& a_bit_vector = split_vectors_a.bit_vector[c];
+            auto& b_bit_vector = split_vectors_b.bit_vector[c];
+            auto* aux_assignment = aux_assignments[c];
+
+            size_t a_bits_cursor = 0, b_bits_cursor = 0;
+            uint64_t a_bits = 0, b_bits = 0;
+            uint32_t a_bit_off = 0, b_bit_off = 0;
+
+            for (size_t i = 0; i < aux_size; i += CHUNK_BITS) {
+                uint64_t a_map = points_a.density_map[i / CHUNK_BITS];
+                uint64_t b_map = points_b_g1.density_map[i / CHUNK_BITS];
+                uint64_t l_bits = 0;
+                uint64_t map_mask = 1;
+
+                size_t chunk_bits = std::min(CHUNK_BITS, aux_size - i);
+                for (size_t j = 0; j < chunk_bits; j++, map_mask <<= 1) {
+                    const fr_t& scalar = aux_assignment[i + j];
+
+                    bool is_one = scalar.is_one();
+                    bool is_zero = scalar.is_zero();
+
+                    if (!is_zero && !is_one)
+                        l_bits |= map_mask;
+
+                    if (a_map & map_mask) {
+                        if (!is_zero && !is_one)
+                            a_bits |= ((uint64_t)1 << a_bit_off);
+
+                        if (++a_bit_off == CHUNK_BITS) {
+                            a_bit_off = 0;
+                            a_bit_vector[a_bits_cursor++] = a_bits;
+                            a_bits = 0;
+                        }
+                    }
+
+                    if (b_map & map_mask) {
+                        if (!is_zero && !is_one)
+                            b_bits |= ((uint64_t)1 << b_bit_off);
+
+                        if (++b_bit_off == CHUNK_BITS) {
+                            b_bit_off = 0;
+                            b_bit_vector[b_bits_cursor++] = b_bits;
+                            b_bits = 0;
+                        }
+                    }
+                }
+
+                l_bit_vector[i / CHUNK_BITS] = l_bits;
+            }
+
+            if (a_bit_off)
+                a_bit_vector[a_bits_cursor] = a_bits;
+
+            if (b_bit_off)
+                b_bit_vector[b_bits_cursor] = b_bits;
+        });
+
+        if (caught_exception)
+            return;
+
+        // merge all the masks from aux_assignments and count set bits
+        std::vector<uint64_t> tail_msm_l_mask(split_vectors_l.bit_vector_size);
+        std::vector<uint64_t> tail_msm_a_mask(split_vectors_a.bit_vector_size);
+        std::vector<uint64_t> tail_msm_b_mask(split_vectors_b.bit_vector_size);
 
         size_t l_counter = 0,
                a_counter = points_a.skip,
                b_counter = points_b_g1.skip;
 
-        for (size_t i = 0; i < aux_assignment_size; i += chunk_bits) {
-            uint64_t a_chunk = points_a.density_map[i / chunk_bits];
-            uint64_t b_chunk = points_b_g1.density_map[i / chunk_bits];
-
-            for (size_t j = 0; j < chunk_bits; j++) {
-                if (i + j >= aux_assignment_size) break;
-
-                const fr_t& scalar = aux_assignment0[i + j];
-
-                bool a_dense = a_chunk & 1;
-                bool b_g1_dense = b_chunk & 1;
-
-                if (!scalar.is_zero() && !scalar.is_one()) {
-                    l_counter++;
-                    if (a_dense)
-                        a_counter++;
-                    if (b_g1_dense)
-                        b_counter++;
-                }
-
-                a_chunk >>= 1;
-                b_chunk >>= 1;
-            }
+        for (size_t i = 0; i < tail_msm_l_mask.size(); i++) {
+            uint64_t mask = split_vectors_l.bit_vector[0][i];
+            for (size_t c = 1; c < num_circuits; c++)
+                mask |= split_vectors_l.bit_vector[c][i];
+            tail_msm_l_mask[i] = mask;
+            l_counter += __builtin_popcountll(mask);
         }
-        // end of pre-processing step
+
+        for (size_t i = 0; i < tail_msm_a_mask.size(); i++) {
+            uint64_t mask = split_vectors_a.bit_vector[0][i];
+            for (size_t c = 1; c < num_circuits; c++)
+                mask |= split_vectors_a.bit_vector[c][i];
+            tail_msm_a_mask[i] = mask;
+            a_counter += __builtin_popcountll(mask);
+        }
+
+        for (size_t i = 0; i < tail_msm_b_mask.size(); i++) {
+            uint64_t mask = split_vectors_b.bit_vector[0][i];
+            for (size_t c = 1; c < num_circuits; c++)
+                mask |= split_vectors_b.bit_vector[c][i];
+            tail_msm_b_mask[i] = mask;
+            b_counter += __builtin_popcountll(mask);
+        }
 
         if (caught_exception)
             return;
@@ -158,34 +225,40 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
         tail_msm_b_g1_bases.resize(b_counter);
         tail_msm_b_g2_bases.resize(b_counter);
 
-        groth16_pool.par_map(num_circuits, [&](size_t c) {
-            uint64_t bit_vector_a_chunk = 0, bit_vector_b_chunk = 0;
-            size_t a_chunk_counter = 0, b_chunk_counter = 0;
-            size_t a_chunk_cursor = 0, b_chunk_cursor = 0;
+        // populate bitmaps for batch additions, bases and scalars for tail msms
+        groth16_pool.par_map(num_circuits, [&, inp_size, aux_size](size_t c) {
+            auto& l_bit_vector = split_vectors_l.bit_vector[c];
+            auto& a_bit_vector = split_vectors_a.bit_vector[c];
+            auto& b_bit_vector = split_vectors_b.bit_vector[c];
+            auto& tail_msm_l_scalars = split_vectors_l.tail_msm_scalars[c];
+            auto& tail_msm_a_scalars = split_vectors_a.tail_msm_scalars[c];
+            auto& tail_msm_b_scalars = split_vectors_b.tail_msm_scalars[c];
+            auto* aux_assignment = aux_assignments[c];
+            auto* inp_assignment = inp_assignments[c];
 
-            uint32_t points_a_cursor = 0, points_b_cursor = 0;
-            size_t l_meaningful_scalars_counter = 0;
-            size_t a_meaningful_scalars_counter = 0;
-            size_t b_meaningful_scalars_counter = 0;
+            size_t points_a_cursor = 0, points_b_cursor = 0;
+            size_t l_cursor = 0;
+            size_t a_cursor = 0;
+            size_t b_cursor = 0;
 
-            for (size_t i = 0; i < input_assignment_size; i++) {
-                const fr_t& scalar = input_assignments[c][i];
+            for (size_t i = 0; i < inp_size; i++) {
+                const fr_t& scalar = inp_assignment[i];
 
                 if (i < points_a.skip) {
                     if (c == 0)
-                        split_vectors_a.tail_msm_indices[a_meaningful_scalars_counter] = points_a_cursor;
-                    split_vectors_a.tail_msm_scalars[c][a_meaningful_scalars_counter] = scalar;
-
-                    a_meaningful_scalars_counter++;
+                        tail_msm_a_bases[a_cursor] = points_a[points_a_cursor];
+                    tail_msm_a_scalars[a_cursor] = scalar;
+                    a_cursor++;
                     points_a_cursor++;
                 }
 
                 if (i < points_b_g1.skip) {
-                    if (c == 0)
-                        split_vectors_b.tail_msm_indices[b_meaningful_scalars_counter] = points_b_cursor;
-                    split_vectors_b.tail_msm_scalars[c][b_meaningful_scalars_counter] = scalar;
-
-                    b_meaningful_scalars_counter++;
+                    if (c == 0) {
+                        tail_msm_b_g1_bases[b_cursor] = points_b_g1[points_b_cursor];
+                        tail_msm_b_g2_bases[b_cursor] = points_b_g2[points_b_cursor];
+                    }
+                    tail_msm_b_scalars[b_cursor] = scalar;
+                    b_cursor++;
                     points_b_cursor++;
                 }
             }
@@ -193,99 +266,94 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
             if (caught_exception)
                 return;
 
-            for (size_t i = 0; i < aux_assignment_size; i += chunk_bits) {
+            uint64_t a_mask = tail_msm_a_mask[0];
+            uint64_t b_mask = tail_msm_b_mask[0];
+            uint64_t a_bits = 0, b_bits = 0;
+            uint32_t a_bit_off = 0, b_bit_off = 0;
+            size_t a_bits_cursor = 0, b_bits_cursor = 0;
 
-                uint64_t a_chunk = points_a.density_map[i / chunk_bits];
-                uint64_t b_chunk = points_b_g1.density_map[i / chunk_bits];
+            for (size_t i = 0; i < aux_size; i += CHUNK_BITS) {
+                uint64_t a_map = points_a.density_map[i / CHUNK_BITS];
+                uint64_t b_map = points_b_g1.density_map[i / CHUNK_BITS];
+                uint64_t l_bits = 0;
+                uint64_t l_mask = tail_msm_l_mask[i / CHUNK_BITS];
+                uint64_t map_mask = 1;
 
-                uint64_t bit_vector_l_chunk = 0;
+                size_t chunk_bits = std::min(CHUNK_BITS, aux_size - i);
+                for (size_t j = 0; j < chunk_bits; j++, map_mask <<= 1) {
+                    const fr_t& scalar = aux_assignment[i + j];
+                    bool is_one = scalar.is_one();
+                    bool is_zero = scalar.is_zero();
 
-                for (size_t j = 0; j < chunk_bits; j++) {
-                    if (i + j >= aux_assignment_size) break;
+                    if (is_one)
+                        l_bits |= map_mask;
 
-                    const fr_t& scalar = aux_assignments[c][i + j];
-
-                    bool a_dense = a_chunk & 1;
-                    bool b_g1_dense = b_chunk & 1;
-
-                    if (scalar.is_one()) {
-                        bit_vector_l_chunk |= ((uint64_t)1 << j);
-                    }
-                    else if (!scalar.is_zero()) {
+                    if (l_mask & map_mask) {
                         if (c == 0)
-                            split_vectors_l.tail_msm_indices[l_meaningful_scalars_counter] = (uint32_t)(i + j);
-                        split_vectors_l.tail_msm_scalars[c][l_meaningful_scalars_counter] = scalar;
-
-                        l_meaningful_scalars_counter++;
+                            tail_msm_l_bases[l_cursor] = points_l[i+j];
+                        tail_msm_l_scalars[l_cursor] = czero(scalar, is_one);
+                        l_cursor++;
                     }
 
-                    if (a_dense) {
-                        if (scalar.is_one()) {
-                            bit_vector_a_chunk |= ((uint64_t)1 << a_chunk_counter);
-                        }
-                        else if (!scalar.is_zero()) {
+                    if (a_map & map_mask) {
+                        uint64_t mask = (uint64_t)1 << a_bit_off;
+
+                        if (a_mask & mask) {
                             if (c == 0)
-                                split_vectors_a.tail_msm_indices[a_meaningful_scalars_counter] = points_a_cursor;
-                            split_vectors_a.tail_msm_scalars[c][a_meaningful_scalars_counter] = scalar;
-
-                            a_meaningful_scalars_counter++;
+                                tail_msm_a_bases[a_cursor] = points_a[points_a_cursor];
+                            tail_msm_a_scalars[a_cursor] = czero(scalar, is_one);
+                            a_cursor++;
                         }
 
-                        a_chunk_counter++;
                         points_a_cursor++;
+
+                        if (is_one)
+                            a_bits |= mask;
+
+                        if (++a_bit_off == CHUNK_BITS) {
+                            a_bit_off = 0;
+                            a_bit_vector[a_bits_cursor++] = a_bits;
+                            a_bits = 0;
+                            a_mask = tail_msm_a_mask[a_bits_cursor];
+                        }
                     }
 
-                    if (b_g1_dense) {
-                        if (scalar.is_one()) {
-                            bit_vector_b_chunk |= ((uint64_t)1 << b_chunk_counter);
-                        }
-                        else if (!scalar.is_zero()) {
-                            if (c == 0)
-                                split_vectors_b.tail_msm_indices[b_meaningful_scalars_counter] = points_b_cursor;
-                            split_vectors_b.tail_msm_scalars[c][b_meaningful_scalars_counter] = scalar;
+                    if (b_map & map_mask) {
+                        uint64_t mask = (uint64_t)1 << b_bit_off;
 
-                            b_meaningful_scalars_counter++;
+                        if (b_mask & mask) {
+                            if (c == 0) {
+                                tail_msm_b_g1_bases[b_cursor] = points_b_g1[points_b_cursor];
+                                tail_msm_b_g2_bases[b_cursor] = points_b_g2[points_b_cursor];
+                            }
+                            tail_msm_b_scalars[b_cursor] = czero(scalar, is_one);
+                            b_cursor++;
                         }
 
-                        b_chunk_counter++;
                         points_b_cursor++;
-                    }
 
-                    if (a_chunk_counter == chunk_bits) {
-                        split_vectors_a.bit_vector[c][a_chunk_cursor] = bit_vector_a_chunk;
-                        a_chunk_counter = 0;
-                        bit_vector_a_chunk = 0;
-                        a_chunk_cursor++;
-                    }
+                        if (is_one)
+                            b_bits |= mask;
 
-                    if (b_chunk_counter == chunk_bits) {
-                        split_vectors_b.bit_vector[c][b_chunk_cursor] = bit_vector_b_chunk;
-                        b_chunk_counter = 0;
-                        bit_vector_b_chunk = 0;
-                        b_chunk_cursor++;
+                        if (++b_bit_off == CHUNK_BITS) {
+                            b_bit_off = 0;
+                            b_bit_vector[b_bits_cursor++] = b_bits;
+                            b_bits = 0;
+                            b_mask = tail_msm_b_mask[b_bits_cursor];
+                        }
                     }
-
-                    a_chunk >>= 1;
-                    b_chunk >>= 1;
                 }
 
-                split_vectors_l.bit_vector[c][i / chunk_bits] = bit_vector_l_chunk;
+                l_bit_vector[i / CHUNK_BITS] = l_bits;
             }
+
+            if (a_bit_off)
+                a_bit_vector[a_bits_cursor] = a_bits;
+
+            if (b_bit_off)
+                b_bit_vector[b_bits_cursor] = b_bits;
         });
-
-        if (caught_exception)
-            return;
-
-        for (size_t i = 0; i < l_counter; i++)
-            tail_msm_l_bases[i] = points_l[split_vectors_l.tail_msm_indices[i]];
-
-        for (size_t i = 0; i < a_counter; i++)
-            tail_msm_a_bases[i] = points_a[split_vectors_a.tail_msm_indices[i]];
-
-        for (size_t i = 0; i < b_counter; i++) {
-            tail_msm_b_g1_bases[i] = points_b_g1[split_vectors_b.tail_msm_indices[i]];
-            tail_msm_b_g2_bases[i] = points_b_g2[split_vectors_b.tail_msm_indices[i]];
-        }
+        // end of pre-processing step
 
         for (size_t i = 0; i < n_gpus; i++)
             barrier.notify();
