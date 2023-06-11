@@ -44,7 +44,7 @@ struct batch_add_results {
                                              b_g2(num_circuits) { }
 };
 
-const size_t chunk_bits = sizeof(uint64_t) * 8; // 64 bits
+const size_t CHUNK_BITS = sizeof(uint64_t) * 8; // 64 bits
 
 #define NUM_BATCHES 8
 #define GPU_DIV (32*WARP_SZ)
@@ -53,8 +53,7 @@ class split_vectors {
 public:
     std::vector<std::vector<uint64_t>> bit_vector;
     std::vector<std::vector<fr_t>>     tail_msm_scalars;
-    std::vector<uint32_t>              tail_msm_indices;
-    size_t batch_size;
+    size_t batch_size, bit_vector_size;
 
     split_vectors(size_t num_circuits, size_t num_points)
         :   bit_vector{num_circuits},
@@ -64,14 +63,14 @@ public:
         batch_size = (batch_size + NUM_BATCHES - 1) / NUM_BATCHES;
         batch_size *= GPU_DIV;
 
+        bit_vector_size = (num_points + CHUNK_BITS - 1) / CHUNK_BITS;
+
         for (size_t c = 0; c < num_circuits; c++) {
-            bit_vector[c].resize((num_points + chunk_bits - 1) / chunk_bits);
+            bit_vector[c].resize(bit_vector_size);
         }
     }
 
     void tail_msms_resize(size_t num_sig_scalars) {
-        tail_msm_indices.resize(num_sig_scalars);
-
         size_t num_circuits = tail_msm_scalars.size();
         for (size_t c = 0; c < num_circuits; c++) {
             tail_msm_scalars[c].resize(num_sig_scalars);
