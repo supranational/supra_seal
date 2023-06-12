@@ -44,15 +44,25 @@ struct batch_add_results {
                                              b_g2(num_circuits) { }
 };
 
-const size_t CHUNK_BITS = sizeof(uint64_t) * 8; // 64 bits
+template<typename T> class uninit {
+    T val;
+public:
+    uninit()            { } // don't zero std::vector<mask_t>
+    uninit(T v)         { val = v; }
+    operator T() const  { return val; }
+};
+
+using mask_t = uninit<uint64_t>;
+
+const size_t CHUNK_BITS = sizeof(mask_t) * 8; // 64 bits
 
 #define NUM_BATCHES 8
 #define GPU_DIV (32*WARP_SZ)
 
 class split_vectors {
 public:
-    std::vector<std::vector<uint64_t>> bit_vector;
-    std::vector<std::vector<fr_t>>     tail_msm_scalars;
+    std::vector<std::vector<mask_t>> bit_vector;
+    std::vector<std::vector<fr_t>>   tail_msm_scalars;
     size_t batch_size, bit_vector_size;
 
     split_vectors(size_t num_circuits, size_t num_points)
@@ -93,20 +103,20 @@ void execute_batch_addition(const gpu_t& gpu,
 
     uint32_t nbuckets = sm_count * BATCH_ADD_BLOCK_SIZE / WARP_SZ;
 
-    uint32_t bit_vector_size = (2 * split_vector.bit_vector[0].size() + WARP_SZ - 1) & (0u - WARP_SZ);
+    uint32_t bit_vector_size = (split_vector.bit_vector_size + WARP_SZ - 1) & (0u - WARP_SZ);
     size_t batch_size = split_vector.batch_size;
+
+    assert(batch_size == (uint32_t)batch_size);
 
     size_t d_points_size = batch_size * 2 * sizeof(affine_h);
     size_t d_buckets_size = num_circuits * nbuckets * sizeof(bucket_h);
 
     dev_ptr_t<byte> d_temp{d_points_size + d_buckets_size +
-                           num_circuits * bit_vector_size * sizeof(uint32_t)};
-
-    assert(batch_size == (uint32_t)batch_size);
+                           num_circuits * bit_vector_size * sizeof(mask_t)};
 
     vec2d_t<affine_h> d_points{&d_temp[0], (uint32_t)batch_size};
     vec2d_t<bucket_h> d_buckets{&d_temp[d_points_size], nbuckets};
-    vec2d_t<uint32_t> d_bit_vectors{&d_temp[d_points_size + d_buckets_size],
+    vec2d_t<mask_t>   d_bit_vectors{&d_temp[d_points_size + d_buckets_size],
                                     bit_vector_size};
 
     uint32_t sid = 0;
@@ -114,7 +124,7 @@ void execute_batch_addition(const gpu_t& gpu,
     for (size_t c = 0; c < num_circuits; c++)
         gpu[sid].HtoD(d_bit_vectors[c],
                       split_vector.bit_vector[curcuit0 + c].data(),
-                      split_vector.bit_vector[curcuit0 + c].size() * 2);
+                      split_vector.bit_vector[curcuit0 + c].size());
 
     size_t remaining_points = points.size - points.skip;
 
@@ -128,7 +138,7 @@ void execute_batch_addition(const gpu_t& gpu,
             gpu[sid].launch_coop(batch_addition<bucket_t>,
                 {sm_count, BATCH_ADD_BLOCK_SIZE},
                 d_buckets[c], (const affine_h*)d_points[sid], amount,
-                (const uint32_t*)&d_bit_vectors[c][cursor / 32],
+                (const uint32_t*)&d_bit_vectors[c][cursor / CHUNK_BITS],
                 batch > 0, sid);
 
         remaining_points -= amount;

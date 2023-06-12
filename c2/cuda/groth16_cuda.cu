@@ -181,9 +181,9 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
             return;
 
         // merge all the masks from aux_assignments and count set bits
-        std::vector<uint64_t> tail_msm_l_mask(split_vectors_l.bit_vector_size);
-        std::vector<uint64_t> tail_msm_a_mask(split_vectors_a.bit_vector_size);
-        std::vector<uint64_t> tail_msm_b_mask(split_vectors_b.bit_vector_size);
+        std::vector<mask_t> tail_msm_l_mask(split_vectors_l.bit_vector_size);
+        std::vector<mask_t> tail_msm_a_mask(split_vectors_a.bit_vector_size);
+        std::vector<mask_t> tail_msm_b_mask(split_vectors_b.bit_vector_size);
 
         size_t l_counter = 0,
                a_counter = points_a.skip,
@@ -283,7 +283,6 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
                 for (size_t j = 0; j < chunk_bits; j++, map_mask <<= 1) {
                     const fr_t& scalar = aux_assignment[i + j];
                     bool is_one = scalar.is_one();
-                    bool is_zero = scalar.is_zero();
 
                     if (is_one)
                         l_bits |= map_mask;
