@@ -70,7 +70,7 @@ index 0afb4f2..b076c89 100644
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..c2a0f59 100644
+index 49c3c20..22f8bb8 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
 @@ -256,7 +256,11 @@ where
@@ -99,7 +99,7 @@ index 49c3c20..c2a0f59 100644
  }
  
  #[allow(clippy::type_complexity)]
-@@ -786,3 +794,178 @@ mod tests {
+@@ -786,3 +794,179 @@ mod tests {
          }
      }
  }
@@ -200,6 +200,7 @@ index 49c3c20..c2a0f59 100644
 +        &provers[0].a_aux_density.bv.as_raw_slice().to_vec(),
 +        &provers[0].b_aux_density.bv.as_raw_slice().to_vec(),
 +        a_aux_density_total,
++        b_input_density_total,
 +        b_aux_density_total,
 +        num_circuits,
 +        r_s.as_slice(),

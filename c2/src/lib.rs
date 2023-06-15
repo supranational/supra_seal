@@ -97,6 +97,7 @@ pub fn generate_groth16_proof<S, D, PR>(
     a_aux_density_bv: &[D],
     b_g1_aux_density_bv: &[D],
     a_aux_total_density: usize,
+    b_g1_input_total_density: usize,
     b_g1_aux_total_density: usize,
     num_circuits: usize,
     r_s: &[S],
@@ -136,16 +137,16 @@ pub fn generate_groth16_proof<S, D, PR>(
 
     let points_b_g1 = points_c {
          points: None.into(),
-         size: b_g1_aux_total_density + 1,
-         skip: 1,
+         size: b_g1_aux_total_density + b_g1_input_total_density,
+         skip: b_g1_input_total_density,
          density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
          total_density: b_g1_aux_total_density,
     };
 
     let points_b_g2 = points_c {
          points: None.into(),
-         size: b_g1_aux_total_density + 1,
-         skip: 1,
+         size: b_g1_aux_total_density + b_g1_input_total_density,
+         skip: b_g1_input_total_density,
          density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
          total_density: b_g1_aux_total_density,
     };
