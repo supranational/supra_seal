@@ -248,25 +248,37 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
             size_t a_cursor = 0;
             size_t b_cursor = 0;
 
-            for (size_t i = 0; i < inp_size; i++) {
-                const fr_t& scalar = inp_assignment[i];
+            for (size_t i = 0; i < inp_size; i += CHUNK_BITS) {
+                size_t chunk_bits = std::min(CHUNK_BITS, inp_size - i);
 
-                if (i < points_a.skip) {
-                    if (c == 0)
-                        tail_msm_a_bases[a_cursor] = points_a[points_a_cursor];
-                    tail_msm_a_scalars[a_cursor] = scalar;
-                    a_cursor++;
-                    points_a_cursor++;
-                }
+                uint64_t b_map = msm_l_a_b_g1_b_g2_inputs.density_map_inp[i / CHUNK_BITS];
 
-                if (i < points_b_g1.skip) {
-                    if (c == 0) {
-                        tail_msm_b_g1_bases[b_cursor] = points_b_g1[points_b_cursor];
-                        tail_msm_b_g2_bases[b_cursor] = points_b_g2[points_b_cursor];
+                for (size_t j = 0; j < chunk_bits; j++) {
+                    const fr_t& scalar = inp_assignment[i + j];
+
+                    bool b_g1_dense = b_map & 1;
+
+                    if (i < points_a.skip) {
+                        if (c == 0)
+                            tail_msm_a_bases[a_cursor] = points_a[points_a_cursor];
+                        tail_msm_a_scalars[a_cursor] = scalar;
+                        a_cursor++;
+                        points_a_cursor++;
                     }
-                    tail_msm_b_scalars[b_cursor] = scalar;
-                    b_cursor++;
-                    points_b_cursor++;
+
+                    if (b_cursor < points_b_g1.skip) {
+                        if (b_g1_dense) {
+                            if (c == 0) {
+                                tail_msm_b_g1_bases[b_cursor] = points_b_g1[points_b_cursor];
+                                tail_msm_b_g2_bases[b_cursor] = points_b_g2[points_b_cursor];
+                            }
+                            tail_msm_b_scalars[b_cursor] = scalar;
+                            b_cursor++;
+                            points_b_cursor++;
+                        }
+                    }
+
+                    b_map >>= 1;
                 }
             }
 
