@@ -275,7 +275,7 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
                 indent += "    ";
             }
 
-            if batch_num > 0 { // TODO SNP: testing only, remove
+            //if batch_num > 0 { // TODO SNP: testing only, remove
             // Wait until it's time for this batch's pc1 to start
             {
                 let mut pc1_counter_lock = pc1_counter.lock().unwrap();
@@ -311,10 +311,10 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
                 }
                 
                 // Do PC1
-                if batch_num > 0 { // TODO SNP: testing only, remove
+                //if batch_num > 0 { // TODO SNP: testing only, remove
                     pc1_wrapper(cur_offset, num_sectors,
                                 replica_ids, parents_cache_file.clone());
-                }
+                //}
                 (*pc1_count).0 += 1;
                 println!("{}**** {} Batch {} done with PC1", indent,
                          chrono::Local::now().format("%Y-%m-%d %H:%M:%S %s"),
@@ -409,20 +409,20 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
             }
 
             // TODO SNP: testing only, remove
-            } else {
-                let cur_slot = batch_num % num_slots;
-                *slot_counter[cur_slot].lock().unwrap() += 1;
-                let mut pc1_count = pc1_counter.lock().unwrap();
-                (*pc1_count).1 += slot_size;
-                // Check if pc1 will overflow available disk space
-                if ((*pc1_count).1 + slot_size) >  max_offset {
-                    (*pc1_count).1 = 0;
-                }
-                (*pc1_count).0 += 1;
+            // } else {
+            //     let cur_slot = batch_num % num_slots;
+            //     *slot_counter[cur_slot].lock().unwrap() += 1;
+            //     let mut pc1_count = pc1_counter.lock().unwrap();
+            //     (*pc1_count).1 += slot_size;
+            //     // Check if pc1 will overflow available disk space
+            //     if ((*pc1_count).1 + slot_size) >  max_offset {
+            //         (*pc1_count).1 = 0;
+            //     }
+            //     (*pc1_count).0 += 1;
                 
-                *pc2_counter.lock().unwrap() += 1;
-                *c1_counter.lock().unwrap() += 1;
-            }
+            //     *pc2_counter.lock().unwrap() += 1;
+            //     *c1_counter.lock().unwrap() += 1;
+            // }
                 
             // C2
             let mut gpu_lock = gpu_lock.lock().unwrap();

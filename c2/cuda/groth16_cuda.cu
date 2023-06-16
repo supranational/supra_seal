@@ -83,11 +83,11 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
 
     const verifying_key* vk = &srs.get_vk();
 
-    ntt_msm_h_inputs.points_h = srs.get_h().data();
-    msm_l_a_b_g1_b_g2_inputs.points_l.points = srs.get_l().data();
-    msm_l_a_b_g1_b_g2_inputs.points_a.points = srs.get_a().data();
-    msm_l_a_b_g1_b_g2_inputs.points_b_g1.points = srs.get_b_g1().data();
-    msm_l_a_b_g1_b_g2_inputs.points_b_g2.points = srs.get_b_g2().data();
+    ntt_msm_h_inputs.points_h = srs.get_h();
+    msm_l_a_b_g1_b_g2_inputs.points_l.points = srs.get_l();
+    msm_l_a_b_g1_b_g2_inputs.points_a.points = srs.get_a();
+    msm_l_a_b_g1_b_g2_inputs.points_b_g1.points = srs.get_b_g1();
+    msm_l_a_b_g1_b_g2_inputs.points_b_g2.points = srs.get_b_g2();
 
     const points_c<affine_t>& points_l = msm_l_a_b_g1_b_g2_inputs.points_l;
     const points_c<affine_t>& points_a = msm_l_a_b_g1_b_g2_inputs.points_a;

@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <map>
+
 #include <util/thread_pool_t.hpp>
 
 struct verifying_key {
@@ -20,6 +22,8 @@ extern "C" {
     int blst_p1_deserialize(affine_t*, const byte[96]);
     int blst_p2_deserialize(affine_fp2_t*, const byte[192]);
 }
+
+class SRS;
 
 class SRS {
 private:
@@ -144,9 +148,10 @@ private:
         mutable std::mutex mtx;
 
     public:
+        std::string path;
         verifying_key vk;
-        std::vector<affine_t> h, l, a, b_g1;
-        std::vector<affine_fp2_t> b_g2;
+        affine_t* h, * l, * a, * b_g1;
+        affine_fp2_t* b_g2;
 
         SRS_internal(SRS_internal const&)   = delete;
         void operator=(SRS_internal const&) = delete;
@@ -154,7 +159,7 @@ private:
     private:
         void read(size_t file_size, const byte* srs_ptr, semaphore_t* barrier)
         {
-            std::lock_guard<std::mutex> guard(mtx);
+           std::lock_guard<std::mutex> guard(mtx);
             barrier->notify();
 
             read_g1_point(&vk.alpha_g1, srs_ptr + 0);
@@ -194,11 +199,11 @@ private:
             data_b_g2.off = data_b_g1.off + data_b_g1.size * p1_affine_size +
                             four_bytes;
 
-            h.resize(data_h.size);
-            l.resize(data_l.size);
-            a.resize(data_a.size);
-            b_g1.resize(data_b_g1.size);
-            b_g2.resize(data_b_g2.size);
+            cudaHostAlloc(&h, data_h.size * sizeof(affine_t), cudaHostAllocMapped);
+            cudaHostAlloc(&l, data_l.size * sizeof(affine_t), cudaHostAllocMapped);
+            cudaHostAlloc(&a, data_a.size * sizeof(affine_t), cudaHostAllocMapped);
+            cudaHostAlloc(&b_g1, data_b_g1.size * sizeof(affine_t), cudaHostAllocMapped);
+            cudaHostAlloc(&b_g2, data_b_g2.size * sizeof(affine_fp2_t), cudaHostAllocMapped);
 
             read_g1_points(&h[0], srs_ptr + data_h.off, data_h.size);
             read_g1_points(&l[0], srs_ptr + data_l.off, data_l.size);
@@ -210,7 +215,7 @@ private:
         }
 
     public:
-        SRS_internal(const char* srs_path) {
+        SRS_internal(const char* srs_path) : path(srs_path) {
             int srs_file = open(srs_path, O_RDONLY);
 
             struct stat st;
@@ -228,22 +233,36 @@ private:
         ~SRS_internal() {
             if (read_th.joinable())
                 read_th.join();
+            if (h)
+                cudaFreeHost(h);
+            if (l)
+                cudaFreeHost(l);
+            if (a)
+                cudaFreeHost(a);
+            if (b_g1)
+                cudaFreeHost(b_g1);
+            if (b_g2)
+                cudaFreeHost(b_g2);
         }
     };
 
+public:
     struct inner {
         const SRS_internal srs;
         std::atomic<size_t> ref_cnt;
         inline inner(const char* srs_path) : srs(srs_path), ref_cnt(1) {}
     };
     inner* ptr = nullptr;
+    inline static std::map<std::string, inner*> srs_cache;
 
 public:
     SRS(const char* srs_path) { ptr = new inner(srs_path); }
     SRS(const SRS& r)   { *this = r; }
     ~SRS() {
-        if (ptr && ptr->ref_cnt.fetch_sub(1, std::memory_order_seq_cst) == 1)
+        if (ptr && ptr->ref_cnt.fetch_sub(1, std::memory_order_seq_cst) == 1) {
+            srs_cache.erase(ptr->srs.path);
             delete ptr;
+        }
     }
 
     SRS& operator=(const SRS& r) {
@@ -265,29 +284,33 @@ public:
         return ptr->srs.vk;
     }
 
-    const std::vector<affine_t>& get_h() const {
+    const affine_t* get_h() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
         return ptr->srs.h;
     }
 
-    const std::vector<affine_t>& get_l() const {
+    const affine_t* get_l() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
         return ptr->srs.l;
     }
 
-    const std::vector<affine_t>& get_a() const {
+    const affine_t* get_a() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
         return ptr->srs.a;
     }
 
-    const std::vector<affine_t>& get_b_g1() const {
+    const affine_t* get_b_g1() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
         return ptr->srs.b_g1;
     }
 
-    const std::vector<affine_fp2_t>& get_b_g2() const {
+    const affine_fp2_t* get_b_g2() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
         return ptr->srs.b_g2;
+    }
+
+    const std::string& get_path() const {
+        return ptr->srs.path;
     }
 
     // facilitate return by value through FFI, as SRS::by_value.
@@ -300,7 +323,18 @@ public:
 };
 
 extern "C" SRS::by_value create_SRS(const char* srs_path) {
-    return SRS{srs_path};
+    std::string path(srs_path);
+
+    if (SRS::srs_cache.find(path) == SRS::srs_cache.end()) {
+        SRS srs{srs_path};
+        SRS::srs_cache[path] = srs.ptr;
+        return srs;
+    }
+    else {
+        SRS::inner* ptr = SRS::srs_cache[path];
+        ptr->ref_cnt.fetch_add(1, std::memory_order_relaxed);
+        return SRS::by_value{ptr};
+    }
 }
 
 extern "C" void drop_SRS(SRS& ref) {
