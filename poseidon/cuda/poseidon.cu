@@ -96,15 +96,15 @@ class PoseidonCuda : public Poseidon {
   static const size_t DOMAIN_TAG = 1;
   static const size_t ARITY = ARITY_DT - DOMAIN_TAG;
   
-  dev_ptr_t<fr_t>* constants_d;
+  gpu_ptr_t<fr_t> constants_d;
   kernel_params_t  kernel_params;
   const gpu_t& gpu;
   
 public:
   PoseidonCuda(const gpu_t& _gpu) : Poseidon(ARITY), gpu(_gpu) {
     select_gpu(gpu);
-    constants_d = new dev_ptr_t<fr_t>(constants_size_ / sizeof(fr_t));
-    fr_t* constants_ptr = *constants_d;
+    constants_d = gpu_ptr_t<fr_t>{(fr_t*)gpu.Dmalloc(constants_size_)};
+    fr_t* constants_ptr = &constants_d[0];
     gpu.HtoD(constants_ptr, constants_file_, constants_size_ / sizeof(fr_t));
     gpu.sync();
 
@@ -114,10 +114,6 @@ public:
     kernel_params.t = t_;
     kernel_params.partial_rounds = partial_rounds_;
     kernel_params.half_full_rounds = half_full_rounds_;
-  }
-  ~PoseidonCuda() {
-    select_gpu(gpu);
-    delete constants_d;
   }
   
   void hash_batch(fr_t* out, fr_t* in,
