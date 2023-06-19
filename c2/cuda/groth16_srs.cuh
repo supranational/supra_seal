@@ -23,8 +23,6 @@ extern "C" {
     int blst_p2_deserialize(affine_fp2_t*, const byte[192]);
 }
 
-class SRS;
-
 class SRS {
 private:
     // This class assumes that the SRS files used by filecoin have a specific file
@@ -82,15 +80,6 @@ private:
         // 3 p1 affine and 3 p2 affine points are in the verification key. 864 bytes
         static const size_t vk_offset = p1_affine_size * 3 + p2_affine_size * 3;
 
-        // the number of points for each of h, l, a, b_g1 and b_g2 are stored as
-        // a big-endian uint32_t in the SRS file
-        static const size_t four_bytes = 4;
-
-        struct srs_data {
-            uint32_t size = 0;
-            size_t off = 0; // in bytes
-        };
-
         template<typename T>
         static T from_big_endian(const unsigned char* ptr) {
             T res = ptr[0];
@@ -108,12 +97,16 @@ private:
             return batch_size;
         }
 
-        static inline void read_g1_point(affine_t* point, const byte* srs_ptr) {
+        static inline size_t read_g1_point(affine_t* point, const byte* srs_ptr)
+        {
             blst_p1_deserialize(point, srs_ptr);
+            return p1_affine_size;
         }
 
-        static inline void read_g2_point(affine_fp2_t* point, const byte* srs_ptr) {
+        static inline size_t read_g2_point(affine_fp2_t* point, const byte* srs_ptr)
+        {
             blst_p2_deserialize(point, srs_ptr);
+            return p2_affine_size;
         }
 
         static void read_g1_points(affine_t* points, const byte* srs_ptr,
@@ -125,7 +118,7 @@ private:
                 reinterpret_cast<decltype(srs)>(srs_ptr);
 
             groth16_pool.par_map(num_points, batch_size, [&](size_t i) {
-                read_g1_point(&points[i], srs[i]);
+                (void)read_g1_point(&points[i], srs[i]);
             }, get_num_threads());
         }
 
@@ -138,85 +131,57 @@ private:
                 reinterpret_cast<decltype(srs)>(srs_ptr);
 
             groth16_pool.par_map(num_points, batch_size, [&](size_t i) {
-                read_g2_point(&points[i], srs[i]);
+                (void)read_g2_point(&points[i], srs[i]);
             }, get_num_threads());
         }
 
-        srs_data data_h, data_l, data_a, data_b_g1, data_b_g2;
 
         std::thread read_th;
         mutable std::mutex mtx;
 
-    public:
         std::string path;
         verifying_key vk;
-        affine_t* h, * l, * a, * b_g1;
-        affine_fp2_t* b_g2;
+
+        template<typename T> class slice_t {
+            T* ptr;
+            size_t nelems;
+        public:
+            slice_t(void *p, size_t n) : ptr(reinterpret_cast<T*>(p)), nelems(n) {}
+            slice_t() : ptr(nullptr), nelems(0) {}
+            T* data() const                     { return ptr; }
+            size_t size() const                 { return nelems; }
+            T& operator[](size_t i) const       { return ptr[i]; }
+        };
+
+#if 0
+#define H_IS_STD__VECTOR
+        std::vector<affine_t> h;
+#else
+        slice_t<affine_t> h;
+#endif
+        slice_t<affine_t> l, a, b_g1;
+        slice_t<affine_fp2_t> b_g2;
+        void* pinned;
 
         SRS_internal(SRS_internal const&)   = delete;
         void operator=(SRS_internal const&) = delete;
 
-    private:
-        void read(size_t file_size, const byte* srs_ptr, semaphore_t* barrier)
-        {
-           std::lock_guard<std::mutex> guard(mtx);
-            barrier->notify();
-
-            read_g1_point(&vk.alpha_g1, srs_ptr + 0);
-            read_g1_point(&vk.beta_g1, srs_ptr + p1_affine_size);
-            read_g2_point(&vk.beta_g2, srs_ptr + 2 * p1_affine_size);
-            read_g2_point(&vk.gamma_g2, srs_ptr + 2 * p1_affine_size +
-                                                      p2_affine_size);
-            read_g1_point(&vk.delta_g1, srs_ptr + 2 * p1_affine_size +
-                                                  2 * p2_affine_size);
-            read_g2_point(&vk.delta_g2, srs_ptr + 3 * p1_affine_size +
-                                                  2 * p2_affine_size);
-
-            uint32_t vk_ic_size = from_big_endian<uint32_t>(srs_ptr + vk_offset);
-
-            data_h.size = from_big_endian<uint32_t>(srs_ptr + vk_offset +
-                                                    four_bytes +
-                                                    vk_ic_size * p1_affine_size);
-            data_h.off = vk_offset + four_bytes + vk_ic_size * p1_affine_size +
-                         four_bytes;
-
-            data_l.size = from_big_endian<uint32_t>(srs_ptr + data_h.off +
-                                                    data_h.size * p1_affine_size);
-            data_l.off = data_h.off + data_h.size * p1_affine_size + four_bytes;
-
-            data_a.size = from_big_endian<uint32_t>(srs_ptr + data_l.off +
-                                                    data_l.size * p1_affine_size);
-            data_a.off = data_l.off + data_l.size * p1_affine_size + four_bytes;
-
-            data_b_g1.size = from_big_endian<uint32_t>(srs_ptr + data_a.off +
-                                                       data_a.size *
-                                                       p1_affine_size);
-            data_b_g1.off = data_a.off + data_a.size * p1_affine_size + four_bytes;
-
-            data_b_g2.size = from_big_endian<uint32_t>(srs_ptr + data_b_g1.off +
-                                                       data_b_g1.size *
-                                                       p1_affine_size);
-            data_b_g2.off = data_b_g1.off + data_b_g1.size * p1_affine_size +
-                            four_bytes;
-
-            cudaHostAlloc(&h, data_h.size * sizeof(affine_t), cudaHostAllocMapped);
-            cudaHostAlloc(&l, data_l.size * sizeof(affine_t), cudaHostAllocMapped);
-            cudaHostAlloc(&a, data_a.size * sizeof(affine_t), cudaHostAllocMapped);
-            cudaHostAlloc(&b_g1, data_b_g1.size * sizeof(affine_t), cudaHostAllocMapped);
-            cudaHostAlloc(&b_g2, data_b_g2.size * sizeof(affine_fp2_t), cudaHostAllocMapped);
-
-            read_g1_points(&h[0], srs_ptr + data_h.off, data_h.size);
-            read_g1_points(&l[0], srs_ptr + data_l.off, data_l.size);
-            read_g1_points(&a[0], srs_ptr + data_a.off, data_a.size);
-            read_g1_points(&b_g1[0], srs_ptr + data_b_g1.off, data_b_g1.size);
-            read_g2_points(&b_g2[0], srs_ptr + data_b_g2.off, data_b_g2.size);
-
-            munmap(const_cast<byte*>(srs_ptr), file_size);
-        }
+        inline static size_t round_up(size_t sz)
+        {   return (sz + 4095) & ((size_t)0 - 4096);   }
 
     public:
-        SRS_internal(const char* srs_path) : path(srs_path) {
+        SRS_internal(const char* srs_path) : path(srs_path), pinned(nullptr) {
+            struct {
+                struct {
+                    uint32_t size;
+                    size_t off; // in bytes
+                } h, l, a, b_g1, b_g2;
+            } data;
+
             int srs_file = open(srs_path, O_RDONLY);
+
+            // TODO, replace asserts with custom exceptions
+            assert(srs_file >= 0);
 
             struct stat st;
             fstat(srs_file, &st);
@@ -224,25 +189,93 @@ private:
 
             const byte* srs_ptr = (const byte*)mmap(NULL, file_size, PROT_READ,
                                                     MAP_PRIVATE, srs_file, 0);
+            assert(srs_ptr != MAP_FAILED);
+
             close(srs_file);
 
+            size_t cursor = 0;
+            cursor += read_g1_point(&vk.alpha_g1, srs_ptr + cursor);
+            cursor += read_g1_point(&vk.beta_g1, srs_ptr + cursor);
+            cursor += read_g2_point(&vk.beta_g2, srs_ptr + cursor);
+            cursor += read_g2_point(&vk.gamma_g2, srs_ptr + cursor);
+            cursor += read_g1_point(&vk.delta_g1, srs_ptr + cursor);
+            cursor += read_g2_point(&vk.delta_g2, srs_ptr + cursor);
+
+            assert(file_size > cursor + sizeof(uint32_t));
+            uint32_t vk_ic_size = from_big_endian<uint32_t>(srs_ptr + cursor);
+            cursor += sizeof(uint32_t);
+
+            cursor += vk_ic_size * p1_affine_size;
+            assert(file_size > cursor + sizeof(uint32_t));
+            data.h.size = from_big_endian<uint32_t>(srs_ptr + cursor);
+            data.h.off  = cursor += sizeof(uint32_t);
+
+            cursor += data.h.size * p1_affine_size;
+            assert(file_size > cursor + sizeof(uint32_t));
+            data.l.size = from_big_endian<uint32_t>(srs_ptr + cursor);
+            data.l.off  = cursor += sizeof(uint32_t);
+
+            cursor += data.l.size * p1_affine_size;
+            assert(file_size > cursor + sizeof(uint32_t));
+            data.a.size = from_big_endian<uint32_t>(srs_ptr + cursor);
+            data.a.off  = cursor += sizeof(uint32_t);
+
+            cursor += data.a.size * p1_affine_size;
+            assert(file_size > cursor + sizeof(uint32_t));
+            data.b_g1.size = from_big_endian<uint32_t>(srs_ptr + cursor);
+            data.b_g1.off  = cursor += sizeof(uint32_t);
+
+            cursor += data.b_g1.size * p1_affine_size;
+            assert(file_size > cursor + sizeof(uint32_t));
+            data.b_g2.size = from_big_endian<uint32_t>(srs_ptr + cursor);
+            data.b_g2.off  = cursor += sizeof(uint32_t);
+
+            cursor += data.b_g2.size * p1_affine_size;
+            assert(file_size >= cursor);
+
+            size_t  l_size  = round_up(data.l.size * sizeof(affine_t)),
+                    a_size  = round_up(data.a.size * sizeof(affine_t)),
+                    b1_size = round_up(data.b_g1.size * sizeof(affine_t)),
+                    b2_size = round_up(data.b_g2.size * sizeof(affine_fp2_t)),
+                    total   = l_size + a_size + b1_size + b2_size;
+#ifndef H_IS_STD__VECTOR
+            total += round_up(data.h.size * sizeof(affine_t));
+#endif
+
+            CUDA_OK(cudaHostAlloc(&pinned, total, cudaHostAllocMapped));
+            byte *ptr = reinterpret_cast<byte*>(pinned);
+
+            l = slice_t<affine_t>{ptr, data.l.size};            ptr += l_size;
+            a = slice_t<affine_t>{ptr, data.a.size};            ptr += a_size;
+            b_g1 = slice_t<affine_t>{ptr, data.b_g1.size};      ptr += b1_size;
+            b_g2 = slice_t<affine_fp2_t>{ptr, data.b_g2.size};  ptr += b2_size;
+
+#ifdef H_IS_STD__VECTOR
+            h.resize(data.h.size);
+#else
+            h = slice_t<affine_t>{ptr, data.h.size};
+#endif
+
             semaphore_t barrier;
-            read_th = std::thread{[=, &barrier] { read(file_size, srs_ptr, &barrier); }};
+            read_th = std::thread([&, srs_ptr, file_size, data] {
+                std::lock_guard<std::mutex> guard(mtx);
+                barrier.notify();
+
+                read_g1_points(&h[0], srs_ptr + data.h.off, data.h.size);
+                read_g1_points(&l[0], srs_ptr + data.l.off, data.l.size);
+                read_g1_points(&a[0], srs_ptr + data.a.off, data.a.size);
+                read_g1_points(&b_g1[0], srs_ptr + data.b_g1.off, data.b_g1.size);
+                read_g2_points(&b_g2[0], srs_ptr + data.b_g2.off, data.b_g2.size);
+
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+            });
             barrier.wait();
         }
         ~SRS_internal() {
             if (read_th.joinable())
                 read_th.join();
-            if (h)
-                cudaFreeHost(h);
-            if (l)
-                cudaFreeHost(l);
-            if (a)
-                cudaFreeHost(a);
-            if (b_g1)
-                cudaFreeHost(b_g1);
-            if (b_g2)
-                cudaFreeHost(b_g2);
+            if (pinned)
+                cudaFreeHost(pinned);
         }
     };
 
@@ -286,27 +319,27 @@ public:
 
     const affine_t* get_h() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
-        return ptr->srs.h;
+        return ptr->srs.h.data();
     }
 
     const affine_t* get_l() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
-        return ptr->srs.l;
+        return ptr->srs.l.data();
     }
 
     const affine_t* get_a() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
-        return ptr->srs.a;
+        return ptr->srs.a.data();
     }
 
     const affine_t* get_b_g1() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
-        return ptr->srs.b_g1;
+        return ptr->srs.b_g1.data();
     }
 
     const affine_fp2_t* get_b_g2() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
-        return ptr->srs.b_g2;
+        return ptr->srs.b_g2.data();
     }
 
     const std::string& get_path() const {
