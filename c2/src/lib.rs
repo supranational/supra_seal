@@ -107,10 +107,14 @@ pub fn generate_groth16_proof<S, D, PR>(
     proofs: &mut [PR],
     srs: &SRS,
 ) {
-    let lg_domain_size = (std::mem::size_of::<usize>() * 8) as u32 - (ntt_scalars_actual_size - 1).leading_zeros();
+    let lg_domain_size =
+        (std::mem::size_of::<usize>() * 8) as u32 - (ntt_scalars_actual_size - 1).leading_zeros();
 
     let bv_element_size: usize = std::mem::size_of::<D>() * 8; // length of D in bits
-    assert!(bv_element_size == 64, "only 64-bit elements in bit vectors are supported");
+    assert!(
+        bv_element_size == 64,
+        "only 64-bit elements in bit vectors are supported"
+    );
 
     let ntt_msm_h_inputs = ntt_msm_h_inputs_c {
         h: None.into(),
@@ -130,27 +134,27 @@ pub fn generate_groth16_proof<S, D, PR>(
     };
 
     let points_a = points_c {
-         points: None.into(),
-         size: a_aux_total_density + input_assignments_size,
-         skip: input_assignments_size,
-         density_map: a_aux_density_bv.as_ptr() as *const core::ffi::c_void,
-         total_density: a_aux_total_density,
+        points: None.into(),
+        size: a_aux_total_density + input_assignments_size,
+        skip: input_assignments_size,
+        density_map: a_aux_density_bv.as_ptr() as *const core::ffi::c_void,
+        total_density: a_aux_total_density,
     };
 
     let points_b_g1 = points_c {
-         points: None.into(),
-         size: b_g1_aux_total_density + b_g1_input_total_density,
-         skip: b_g1_input_total_density,
-         density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
-         total_density: b_g1_aux_total_density,
+        points: None.into(),
+        size: b_g1_aux_total_density + b_g1_input_total_density,
+        skip: b_g1_input_total_density,
+        density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
+        total_density: b_g1_aux_total_density,
     };
 
     let points_b_g2 = points_c {
-         points: None.into(),
-         size: b_g1_aux_total_density + b_g1_input_total_density,
-         skip: b_g1_input_total_density,
-         density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
-         total_density: b_g1_aux_total_density,
+        points: None.into(),
+        size: b_g1_aux_total_density + b_g1_input_total_density,
+        skip: b_g1_input_total_density,
+        density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
+        total_density: b_g1_aux_total_density,
     };
 
     let msm_l_a_b_g1_b_g2_inputs = msm_l_a_b_g1_b_g2_inputs_c {

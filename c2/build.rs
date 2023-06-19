@@ -24,8 +24,7 @@ fn groth16_cuda() {
     nvcc.flag("-Xcompiler").flag("-Wno-subobject-linkage");
     nvcc.flag("-Xcompiler").flag("-Wno-unused-function");
 
-    nvcc.file("cuda/groth16_cuda.cu")
-        .compile("groth16_cuda");
+    nvcc.file("cuda/groth16_cuda.cu").compile("groth16_cuda");
 
     println!("cargo:rerun-if-changed=cuda");
     println!("cargo:rerun-if-env-changed=CXXFLAGS");

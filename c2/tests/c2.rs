@@ -10,18 +10,15 @@ use std::time::Instant;
 
 use filecoin_proofs_api::SectorId;
 use filecoin_proofs_v1::{
-    seal_commit_phase2, verify_seal, PoRepConfig, SealCommitPhase1Output,
-    SectorShape32GiB,
-    caches::get_stacked_params,
-    constants::SECTOR_SIZE_32_GIB,
+    caches::get_stacked_params, constants::SECTOR_SIZE_32_GIB, seal_commit_phase2, verify_seal,
+    PoRepConfig, SealCommitPhase1Output, SectorShape32GiB,
 };
 use storage_proofs_core::api_version::ApiVersion;
 
 #[test]
 fn run_seal() {
     let commit_phase1_output = {
-        let mut commit_phase1_output_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut commit_phase1_output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         commit_phase1_output_path.push(COMMIT_PHASE1_OUTPUT_FILE);
         println!("*** Restoring commit phase1 output file");
         let commit_phase1_output_bytes = read(&commit_phase1_output_path)
@@ -47,10 +44,8 @@ fn run_seal() {
     let arbitrary_porep_id = [99; 32];
 
     let porep_config =
-        PoRepConfig::new_groth16(SECTOR_SIZE_32_GIB, arbitrary_porep_id,
-                                 ApiVersion::V1_1_0);
-    let groth_params =
-        get_stacked_params::<SectorShape32GiB>(porep_config).unwrap();
+        PoRepConfig::new_groth16(SECTOR_SIZE_32_GIB, arbitrary_porep_id, ApiVersion::V1_1_0);
+    let groth_params = get_stacked_params::<SectorShape32GiB>(porep_config).unwrap();
     let param_file_path = groth_params.param_file_path.clone();
 
     println!("Reading SRS file {:?}", param_file_path);
@@ -73,13 +68,8 @@ fn run_seal() {
 
     println!("Starting seal_commit_phase2");
     let now = Instant::now();
-    let commit_output = seal_commit_phase2(
-        porep_config,
-        commit_phase1_output,
-        prover_id,
-        sector_id
-    )
-    .unwrap();
+    let commit_output =
+        seal_commit_phase2(porep_config, commit_phase1_output, prover_id, sector_id).unwrap();
     println!("seal_commit_phase2 took: {:.2?}", now.elapsed());
 
     println!("Verifying result");
@@ -96,9 +86,9 @@ fn run_seal() {
     .unwrap();
 
     if result == true {
-      println!("Verification PASSED!");
+        println!("Verification PASSED!");
     } else {
-      println!("Verification FAILED!");
+        println!("Verification FAILED!");
     }
 
     assert!(result, "Verification FAILED");
