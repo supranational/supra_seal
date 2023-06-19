@@ -47,16 +47,16 @@ struct points_c {
     points: core::cell::Cell<Option<core::ptr::NonNull<i8>>>,
     size: usize,
     skip: usize,
-    density_map: *const core::ffi::c_void,
+    density_map: *const u64,
     total_density: usize,
 }
 
 #[repr(C)]
 struct ntt_msm_h_inputs_c {
     h: core::cell::Cell<Option<core::ptr::NonNull<i8>>>,
-    a: *const core::ffi::c_void,
-    b: *const core::ffi::c_void,
-    c: *const core::ffi::c_void,
+    a: *const *const core::ffi::c_void,
+    b: *const *const core::ffi::c_void,
+    c: *const *const core::ffi::c_void,
     lg_domain_size: usize,
     actual_size: usize, // this value is very close to a power of 2
 }
@@ -67,9 +67,9 @@ struct msm_l_a_b_g1_b_g2_inputs_c {
     points_a: points_c,
     points_b_g1: points_c,
     points_b_g2: points_c,
-    density_map_inp: *const core::ffi::c_void,
-    input_assignments: *const core::ffi::c_void,
-    aux_assignments: *const core::ffi::c_void,
+    density_map_inp: *const u64,
+    input_assignments: *const *const core::ffi::c_void,
+    aux_assignments: *const *const core::ffi::c_void,
     input_assignment_size: usize,
     aux_assignment_size: usize,
 }
@@ -107,8 +107,17 @@ pub fn generate_groth16_proof<S, D, PR>(
     proofs: &mut [PR],
     srs: &SRS,
 ) {
-    let lg_domain_size =
-        (std::mem::size_of::<usize>() * 8) as u32 - (ntt_scalars_actual_size - 1).leading_zeros();
+    let lg_domain_size = (std::mem::size_of_val(&ntt_scalars_actual_size) * 8)
+        - (ntt_scalars_actual_size - 1).leading_zeros() as usize;
+
+    assert_eq!(ntt_a_scalars.len(), num_circuits);
+    assert_eq!(ntt_b_scalars.len(), num_circuits);
+    assert_eq!(ntt_c_scalars.len(), num_circuits);
+    assert_eq!(input_assignments.len(), num_circuits);
+    assert_eq!(aux_assignments.len(), num_circuits);
+    assert_eq!(r_s.len(), num_circuits);
+    assert_eq!(s_s.len(), num_circuits);
+    assert_eq!(proofs.len(), num_circuits);
 
     let bv_element_size: usize = std::mem::size_of::<D>() * 8; // length of D in bits
     assert!(
@@ -116,20 +125,23 @@ pub fn generate_groth16_proof<S, D, PR>(
         "only 64-bit elements in bit vectors are supported"
     );
 
+    assert!(a_aux_density_bv.len() * bv_element_size >= aux_assignments_size);
+    assert!(b_g1_aux_density_bv.len() * bv_element_size >= aux_assignments_size);
+
     let ntt_msm_h_inputs = ntt_msm_h_inputs_c {
         h: None.into(),
-        a: ntt_a_scalars.as_ptr() as *const core::ffi::c_void,
-        b: ntt_b_scalars.as_ptr() as *const core::ffi::c_void,
-        c: ntt_c_scalars.as_ptr() as *const core::ffi::c_void,
-        lg_domain_size: lg_domain_size as usize,
-        actual_size: ntt_scalars_actual_size as usize,
+        a: ntt_a_scalars.as_ptr() as *const *const _,
+        b: ntt_b_scalars.as_ptr() as *const *const _,
+        c: ntt_c_scalars.as_ptr() as *const *const _,
+        lg_domain_size: lg_domain_size,
+        actual_size: ntt_scalars_actual_size,
     };
 
     let points_l = points_c {
         points: None.into(),
         size: aux_assignments_size,
         skip: 0usize,
-        density_map: std::ptr::null() as *const core::ffi::c_void, // l always has FullDensity
+        density_map: std::ptr::null() as *const _, // l always has FullDensity
         total_density: aux_assignments_size,
     };
 
@@ -137,7 +149,7 @@ pub fn generate_groth16_proof<S, D, PR>(
         points: None.into(),
         size: a_aux_total_density + input_assignments_size,
         skip: input_assignments_size,
-        density_map: a_aux_density_bv.as_ptr() as *const core::ffi::c_void,
+        density_map: a_aux_density_bv.as_ptr() as *const _,
         total_density: a_aux_total_density,
     };
 
@@ -145,7 +157,7 @@ pub fn generate_groth16_proof<S, D, PR>(
         points: None.into(),
         size: b_g1_aux_total_density + b_g1_input_total_density,
         skip: b_g1_input_total_density,
-        density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
+        density_map: b_g1_aux_density_bv.as_ptr() as *const _,
         total_density: b_g1_aux_total_density,
     };
 
@@ -153,7 +165,7 @@ pub fn generate_groth16_proof<S, D, PR>(
         points: None.into(),
         size: b_g1_aux_total_density + b_g1_input_total_density,
         skip: b_g1_input_total_density,
-        density_map: b_g1_aux_density_bv.as_ptr() as *const core::ffi::c_void,
+        density_map: b_g1_aux_density_bv.as_ptr() as *const _,
         total_density: b_g1_aux_total_density,
     };
 
@@ -162,9 +174,9 @@ pub fn generate_groth16_proof<S, D, PR>(
         points_a: points_a,
         points_b_g1: points_b_g1,
         points_b_g2: points_b_g2,
-        density_map_inp: b_g1_input_density_bv.as_ptr() as *const core::ffi::c_void,
-        input_assignments: input_assignments.as_ptr() as *const core::ffi::c_void,
-        aux_assignments: aux_assignments.as_ptr() as *const core::ffi::c_void,
+        density_map_inp: b_g1_input_density_bv.as_ptr() as *const _,
+        input_assignments: input_assignments.as_ptr() as *const *const _,
+        aux_assignments: aux_assignments.as_ptr() as *const *const _,
         input_assignment_size: input_assignments_size,
         aux_assignment_size: aux_assignments_size,
     };
