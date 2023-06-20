@@ -5,8 +5,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <map>
-
+#include <list>
 #include <util/thread_pool_t.hpp>
 
 struct verifying_key {
@@ -279,21 +278,18 @@ private:
         }
     };
 
-public:
     struct inner {
         const SRS_internal srs;
         std::atomic<size_t> ref_cnt;
         inline inner(const char* srs_path) : srs(srs_path), ref_cnt(1) {}
     };
-    inner* ptr = nullptr;
-    inline static std::map<std::string, inner*> srs_cache;
+    inner* ptr;
 
 public:
     SRS(const char* srs_path) { ptr = new inner(srs_path); }
     SRS(const SRS& r)   { *this = r; }
     ~SRS() {
         if (ptr && ptr->ref_cnt.fetch_sub(1, std::memory_order_seq_cst) == 1) {
-            srs_cache.erase(ptr->srs.path);
             delete ptr;
         }
     }
@@ -353,27 +349,59 @@ public:
         return {ptr};
     }
     SRS(by_value v) { ptr = v.ptr; }
+
+    class SRS_cache {
+        std::list<std::pair<std::string, SRS>> list;
+        std::mutex mtx;
+
+    public:
+        SRS lookup(const char *key)
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+
+            for (auto it = list.begin(); it != list.end(); ++it) {
+                if (it->first == key) {
+                    if (it != list.begin()) {
+                        // move to the beginning of the list
+                        list.splice(list.begin(), list, it);
+                    }
+                    return it->second;
+                }
+            }
+
+            if (list.size() > 3)
+                list.pop_back(); // least recently used
+
+            list.emplace_front(std::make_pair(key, SRS{key}));
+
+            return list.begin()->second;
+        }
+
+        void evict(const char *key)
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+
+            list.remove_if([=](decltype(list)::value_type& elem) {
+                return elem.first == key;
+            });
+        }
+    };
+
+    static SRS_cache& cache()
+    {
+        static SRS_cache da_cache;
+        return da_cache;
+    }
 };
 
-extern "C" SRS::by_value create_SRS(const char* srs_path) {
-    std::string path(srs_path);
+extern "C" SRS::by_value create_SRS(const char* srs_path)
+{   return SRS::cache().lookup(srs_path);   }
 
-    if (SRS::srs_cache.find(path) == SRS::srs_cache.end()) {
-        SRS srs{srs_path};
-        SRS::srs_cache[path] = srs.ptr;
-        return srs;
-    }
-    else {
-        SRS::inner* ptr = SRS::srs_cache[path];
-        ptr->ref_cnt.fetch_add(1, std::memory_order_relaxed);
-        return SRS::by_value{ptr};
-    }
-}
+extern "C" void evict_SRS(const char* srs_path)
+{   SRS::cache().evict(srs_path);   }
 
-extern "C" void drop_SRS(SRS& ref) {
-    ref.~SRS();
-}
+extern "C" void drop_SRS(SRS& ref)
+{   ref.~SRS();   }
 
-extern "C" SRS::by_value clone_SRS(const SRS& rhs) {
-    return rhs;
-}
+extern "C" SRS::by_value clone_SRS(const SRS& rhs)
+{   return rhs;   }
