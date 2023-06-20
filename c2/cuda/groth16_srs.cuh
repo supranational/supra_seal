@@ -242,7 +242,7 @@ private:
             total += round_up(data.h.size * sizeof(affine_t));
 #endif
 
-            CUDA_OK(cudaHostAlloc(&pinned, total, cudaHostAllocMapped));
+            CUDA_OK(cudaHostAlloc(&pinned, total, cudaHostAllocPortable));
             byte *ptr = reinterpret_cast<byte*>(pinned);
 
             l = slice_t<affine_t>{ptr, data.l.size};            ptr += l_size;
