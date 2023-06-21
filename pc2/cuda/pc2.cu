@@ -308,21 +308,19 @@ void pc2_t<C>::open_files() {
     }
 
     // Data files for encoding
-    if (!tree_r_only) {
-      if (data_filenames != nullptr && data_filenames[i] != nullptr) {
-        data_files[i].mmap_read(data_filenames[i], SECTOR_SIZE);
-        // If there is a data file present we will encode layer 11 and write the
-        // sealed data
-        assert(sealed_files[i].open(sealed_filenames[i], SECTOR_SIZE, true, false) == 0);
-        has_non_cc_sectors = true;
-      } else {
-        // Write the raw layer 11 data
-        // It would be nice to write different files for encoded vs not encoded data but in
-        // reality we can't differentiate between CC and sectors that will use remote data.
-        // So we write them all to 'sealed_data' here.
-        assert(sealed_files[i].open(sealed_filenames[i], SECTOR_SIZE, true, false) == 0);
-        has_cc_sectors = true;
-      }
+    if (data_filenames != nullptr && data_filenames[i] != nullptr) {
+      data_files[i].mmap_read(data_filenames[i], SECTOR_SIZE);
+      // If there is a data file present we will encode layer 11 and write the
+      // sealed data
+      assert(sealed_files[i].open(sealed_filenames[i], SECTOR_SIZE, true, false) == 0);
+      has_non_cc_sectors = true;
+    } else {
+      // Write the raw layer 11 data
+      // It would be nice to write different files for encoded vs not encoded data but in
+      // reality we can't differentiate between CC and sectors that will use remote data.
+      // So we write them all to 'sealed_data' here.
+      assert(sealed_files[i].open(sealed_filenames[i], SECTOR_SIZE, true, false) == 0);
+      has_cc_sectors = true;
     }
   }
 }
@@ -672,14 +670,12 @@ void pc2_t<C>::hash_gpu(size_t partition) {
 
       case ResourceState::DATA_WAIT:
         if (resource.valid.load() == resource.valid_count) {
-          if (!tree_r_only) {
-            if (disk_batcher.size() < 1) {
-              break;
-            }
-            to_disk = disk_batcher.dequeue();
-            assert (to_disk != nullptr);
+          if (disk_batcher.size() < 1) {
+            break;
           }
-
+          to_disk = disk_batcher.dequeue();
+          assert (to_disk != nullptr);
+          
           fr_t* encode_buf = &resource.replica_data[0];
           
           // Copy layer 11 data to to_disk buffer for encoding/writing
@@ -713,30 +709,25 @@ void pc2_t<C>::hash_gpu(size_t partition) {
             }
           }
 
-          if (!tree_r_only) {
-            // Prepare write pointers
-            to_disk->size = batch_size;
-            to_disk->stride = C::PARALLEL_SECTORS;
-            to_disk->reverse = true;
-            to_disk->offset = resource.start_node;
-            for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-              to_disk->src[i] = &to_disk->data[i];
-              //to_disk->dst[i] = &sealed_files[i][resource.start_node];
-              to_disk->dst[i] = &sealed_files[i];
-              // printf("Initiate replica write from %p to %p offset %ld size %ld\n",
-              //        to_disk->src[i], to_disk->dst[i], to_disk->offset, to_disk->size);
-            }
-            
-            // Copy the encoded replica data into the disk buffer
-            memcpy(&to_disk->data[0],
-                   &resource.replica_data[0],
-                   batch_size * C::PARALLEL_SECTORS * sizeof(fr_t));
+          // Prepare write pointers
+          to_disk->size = batch_size;
+          to_disk->stride = C::PARALLEL_SECTORS;
+          to_disk->reverse = true;
+          to_disk->offset = resource.start_node;
+          for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
+            to_disk->src[i] = &to_disk->data[i];
+            to_disk->dst[i] = &sealed_files[i];
           }
           
+          // Copy the encoded replica data into the disk buffer
+          memcpy(&to_disk->data[0],
+                 &resource.replica_data[0],
+                 batch_size * C::PARALLEL_SECTORS * sizeof(fr_t));
+          
+          assert(disk_batcher.enqueue(to_disk));
           if (tree_r_only) {
             resource.state = ResourceState::HASH_COLUMN_LEAVES;
           } else {
-            assert(disk_batcher.enqueue(to_disk));
             resource.state = ResourceState::HASH_COLUMN;
           }
         }

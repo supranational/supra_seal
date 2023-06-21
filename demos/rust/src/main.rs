@@ -231,7 +231,7 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     // Batch 0  PC1  PC2   C1   C2
     // Batch 1       PC1  PC2   C1   C2
     // Batch 2            PC1  PC2   C1   C2
-    let num_batches = 5;
+    let num_batches = 3;
     for batch_num in 0..num_batches {
         let pc1_counter = Arc::clone(&pc1_counter);
         let pc2_counter = Arc::clone(&pc2_counter);

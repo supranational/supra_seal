@@ -95,7 +95,6 @@ public:
     }
     cur_hash_out--;
     delete [] local_store;
-    print_buffer((uint8_t*)cur_hash_out, sizeof(node_t));
   }
 
   // Multi-threaded tree builder
@@ -250,6 +249,9 @@ public:
       timestamp_t stop = std::chrono::high_resolution_clock::now();
       uint64_t secs = std::chrono::duration_cast<
         std::chrono::seconds>(stop - start).count();
+
+      // Use the encoded data for tree building
+      leaves = &encoded_leaves[0];
       printf("Encoding took %ld seconds\n", secs);
     }
 

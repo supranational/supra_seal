@@ -100,7 +100,7 @@ public:
     }
 
     print_parameters();
-    print_temps();
+    //print_temps();
   }
 
   void print_temps() {

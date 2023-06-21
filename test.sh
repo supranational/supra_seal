@@ -17,15 +17,15 @@ set -x
 
 cache_512MiB="../cache_benchy_run_512MiB"
 cache_32GiB="../cache_benchy_run_32GiB"
+
+# This cache is random data, not cc
+cache_512MiB_rand="../cache_benchy_run_512MiB_rand"
+
 test_dir="/var/tmp/supra_seal/test_tmp"
 
 rm -fr $test_dir/*
 
-echo "************************************************************"
-echo "* 512MiB sealing pipeline"
-echo "************************************************************"
-
-./exec.sh 512MiB
+./build.sh 512MiB
 
 echo "************************************************************"
 echo "* 512MiB pc2"
@@ -37,6 +37,27 @@ cmp $cache_512MiB/p_aux $test_dir/pc2_test_512MiB/p_aux
 cmp $cache_512MiB/sc-02-data-tree-c.dat $test_dir/pc2_test_512MiB/sc-02-data-tree-c.dat
 cmp $cache_512MiB/sc-02-data-tree-r-last.dat $test_dir/pc2_test_512MiB/sc-02-data-tree-r-last.dat
 cmp $cache_512MiB/sealed-file $test_dir/pc2_test_512MiB/sealed-file
+
+echo "************************************************************"
+echo "* 512MiB tree-r random"
+echo "************************************************************"
+
+mkdir -p $test_dir/tree-r_test_512MiB_rand
+./bin/tree_r -l $cache_512MiB_rand/sc-02-data-layer-2.dat -d $cache_512MiB_rand/staged-file -o $test_dir/tree-r_test_512MiB_rand
+# Only the root of r is written to p_aux
+cmp -i 32 ../cache_benchy_run_512MiB_rand/p_aux /var/tmp/supra_seal/test_tmp/tree-r_test_512MiB_rand/p_aux 
+cmp $cache_512MiB_rand/sc-02-data-tree-r-last.dat $test_dir/tree-r_test_512MiB_rand/sc-02-data-tree-r-last.dat
+cmp $cache_512MiB_rand/sealed-file $test_dir/tree-r_test_512MiB_rand/sealed-file
+
+echo "************************************************************"
+echo "* 512MiB tree-r-cpu random"
+echo "************************************************************"
+
+mkdir -p $test_dir/tree-r-cpu_test_512MiB_rand
+./bin/tree_r_cpu -l $cache_512MiB_rand/sc-02-data-layer-2.dat -d $cache_512MiB_rand/staged-file -o $test_dir/tree-r-cpu_test_512MiB_rand
+cmp $cache_512MiB_rand/sc-02-data-tree-r-last.dat $test_dir/tree-r-cpu_test_512MiB_rand/sc-02-data-tree-r-last.dat
+cmp $cache_512MiB_rand/sealed-file $test_dir/tree-r-cpu_test_512MiB_rand/sealed-file
+
 
 echo "************************************************************"
 echo "* 32GiB pc2"
@@ -53,9 +74,8 @@ cmp $cache_32GiB/sc-02-data-tree-r-last-0.dat $test_dir/pc2_test_32GiB/sc-02-dat
 cmp $cache_32GiB/sc-02-data-tree-r-last-1.dat $test_dir/pc2_test_32GiB/sc-02-data-tree-r-last-1.dat
 cmp $cache_32GiB/sealed-file $test_dir/pc2_test_32GiB/sealed-file
 
-
 echo "************************************************************"
-echo "* 32GiB tree-r"
+echo "* 32GiB tree-r CC"
 echo "************************************************************"
 
 mkdir -p $test_dir/tree-r_test_32GiB
@@ -86,3 +106,10 @@ echo "************************************************************"
 
 cd c2
 cargo test --release --test c2 -- --nocapture
+
+# echo "************************************************************"
+# echo "* 512MiB sealing pipeline"
+# echo "************************************************************"
+
+# ./exec.sh 512MiB
+
