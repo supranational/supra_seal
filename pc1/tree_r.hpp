@@ -254,7 +254,7 @@ public:
     }
 
     TreeBuilder tree_r(params.GetNumTreeRCArity(), params.GetNumTreeRDiscardRows());
-    size_t elmts = tree_r.size(cur_nodes);
+    size_t elmts = tree_r.size(cur_nodes / params.GetNumTreeRCFiles());
 
     printf("Building tree-r...\n");
     timestamp_t start = std::chrono::high_resolution_clock::now();

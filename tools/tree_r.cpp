@@ -57,8 +57,7 @@ void gpu_tree_r(std::string config_filename,
   size_t stream_count = 64;
 
   // Batch size in nodes. Each node includes all parallel sectors
-  // TODO: optimize batch size
-  size_t batch_size = 64;
+  size_t batch_size = 64 * 64;
 
   // Nodes to read per partition
   size_t nodes_to_read = params.GetNumNodes() / params.GetNumTreeRCFiles();

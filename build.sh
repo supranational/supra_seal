@@ -182,11 +182,6 @@ $CXX $CXXFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
     -Lobj -lsupraseal \
     $LDFLAGS -Ldeps/blst -lblst -L$CUDA/lib64 -lcudart_static -lgmp -lconfig++ &
 
-$CXX $CXXSTD -pthread -DSECTOR_SIZE_512MiB -g -O3 -march=native \
-    -Wno-subobject-linkage \
-    tools/c1.cpp sealing/sector_parameters.cpp util/debug_helpers.cpp \
-    -o bin/c1 -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst -lgmp &
-
 # tree-r CPU only
 $CXX $CXXSTD -pthread -g -O3 -march=native \
     -Wall -Wextra -Werror -Wno-subobject-linkage \

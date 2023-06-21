@@ -132,9 +132,11 @@ pc2_t<C>::~pc2_t() {
     delete poseidon_trees[i];
   }
   for (size_t i = 0; i < C::PARALLEL_SECTORS; i++) {
-    for (size_t j = 0; j < params.GetNumTreeRCFiles(); j++) {
-      delete tree_c_files[i][j];
-      delete tree_r_files[i][j];
+    for (auto it : tree_c_files[i]) {
+      delete it;
+    }
+    for (auto it : tree_r_files[i]) {
+      delete it;
     }
   }
   cudaHostUnregister(page_buffer);
@@ -296,8 +298,6 @@ void pc2_t<C>::open_files() {
         assert(tree_c_files[i][j]->open(tree_c_filenames[i][j],
                                         tree_c_address.data_size(), true, false) == 0);
         tree_c_files[i][j]->advise_random();
-      } else {
-        tree_c_files[i][j] = nullptr;
       }
                             
       // tree-r
@@ -860,15 +860,15 @@ void pc2_t<C>::hash_gpu(size_t partition) {
         break;
 
       case ResourceState::HASH_LEAF:
-        write_tree_c = true;
-        disk_bufs_needed = !tree_r_only + write_tree_c;
+        write_tree_c = !tree_r_only;
+        write_tree_r = resource.work_r.idx.layer() > params.GetNumTreeRDiscardRows();
+        disk_bufs_needed = write_tree_c + write_tree_r;
         if (disk_batcher.size() < disk_bufs_needed) {
           break;
         }
         if (resource.last && !gpu_results_in_use.try_lock()) {
           break;
         }
-        write_tree_c = true;
         if (!tree_r_only) {
           if (write_tree_c) {
             to_disk = disk_batcher.dequeue();
@@ -940,7 +940,6 @@ void pc2_t<C>::hash_gpu(size_t partition) {
                                batch_size * C::PARALLEL_SECTORS / TREE_ARITY);
         }
 
-        write_tree_r = resource.work_r.idx.layer() > params.GetNumTreeRDiscardRows();
         if (write_tree_r) {
           to_disk_r = disk_batcher.dequeue();
           assert (to_disk_r != nullptr);
