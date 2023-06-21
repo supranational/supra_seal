@@ -261,7 +261,6 @@ void pc2_t<C>::get_filenames(SectorParameters& params, const char* output_dir,
   }
 }
 
-// TODO SNP: Use get_filenames
 template<class C>
 void pc2_t<C>::open_files() {
   std::vector<std::string> directories;
@@ -336,6 +335,7 @@ void pc2_t<C>::hash() {
     set_core_affinity(topology.pc2_hasher_cpu);
   });
 
+  // Use a channel to prevent the GPU from racing ahead of the CPU
   channel_t<int> ch;
   ch.send(-1);
 
@@ -702,9 +702,13 @@ void pc2_t<C>::hash_gpu(size_t partition) {
                 fr_t data = data_files[i][resource.start_node + j];
                 fr_t* elmt = &encode_buf[i + j * C::PARALLEL_SECTORS];
                 node_t* n = (node_t*)elmt;
-                n->reverse_l();
+                if (!reader.data_is_big_endian()) {
+                  n->reverse_l();
+                }
                 *elmt += data;
-                n->reverse_l();
+                if (!reader.data_is_big_endian()) {
+                  n->reverse_l();
+                }
               }
             }
           }
@@ -928,6 +932,14 @@ void pc2_t<C>::hash_gpu(size_t partition) {
         }
         
         // tree-r
+        if (resource.last) {
+          // Stash the final result in a known place
+          size_t stride = batch_size * C::PARALLEL_SECTORS / TREE_ARITY;
+          fr_t* host_buf_r = (fr_t*)&gpu_results_r[resource.id * stride];
+          resource.stream.DtoH(host_buf_r, out_r_d,
+                               batch_size * C::PARALLEL_SECTORS / TREE_ARITY);
+        }
+
         write_tree_r = resource.work_r.idx.layer() > params.GetNumTreeRDiscardRows();
         if (write_tree_r) {
           to_disk_r = disk_batcher.dequeue();
@@ -935,15 +947,6 @@ void pc2_t<C>::hash_gpu(size_t partition) {
           resource.stream.DtoH(&to_disk_r->data[0], out_r_d,
                                batch_size * C::PARALLEL_SECTORS / TREE_ARITY);
           
-          if (resource.last) {
-            // Stash the final result in a known place
-            size_t stride = batch_size * C::PARALLEL_SECTORS / TREE_ARITY;
-            fr_t* host_buf_r = (fr_t*)&gpu_results_r[resource.id * stride];
-            CUDA_OK(cudaMemcpyAsync(host_buf_r, &to_disk_r->data[0],
-                                    batch_size * C::PARALLEL_SECTORS / TREE_ARITY * sizeof(fr_t),
-                                    cudaMemcpyHostToHost, resource.stream));
-          }
-
           layer_offset = layer_offsets_r[resource.work_r.idx.layer() - params.GetNumTreeRDiscardRows() - 1];
           addr = node_id_t(resource.work_r.idx.layer() - params.GetNumTreeRDiscardRows() - 1,
                            resource.work_r.idx.node() * batch_size / TREE_ARITY +
