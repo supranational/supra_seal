@@ -394,8 +394,8 @@ public:
     }
 };
 
-extern "C" SRS::by_value create_SRS(const char* srs_path)
-{   return SRS::cache().lookup(srs_path);   }
+extern "C" SRS::by_value create_SRS(const char* srs_path, bool cache)
+{   return cache ? SRS::cache().lookup(srs_path) : SRS{srs_path};   }
 
 extern "C" void evict_SRS(const char* srs_path)
 {   SRS::cache().evict(srs_path);   }
