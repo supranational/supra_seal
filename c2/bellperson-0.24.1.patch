@@ -70,7 +70,7 @@ index 0afb4f2..b076c89 100644
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..2370465 100644
+index 49c3c20..8155f7b 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
 @@ -256,7 +256,11 @@ where
@@ -119,7 +119,7 @@ index 49c3c20..2370465 100644
 +    E::G1Affine: GpuName,
 +    E::G2Affine: GpuName,
 +{
-+    let srs = match supraseal_c2::SRS::try_new(params.get_file_path()) {
++    let srs = match supraseal_c2::SRS::try_new(params.get_file_path(), true) {
 +        Ok(srs) => srs,
 +        Err(err) => panic!(
 +            "Failed to read SRS file with message: {}",

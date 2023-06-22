@@ -10,13 +10,13 @@ pub struct SRS {
 }
 
 impl SRS {
-    pub fn try_new(srs_path: PathBuf) -> Result<Self, cuda::Error> {
+    pub fn try_new(srs_path: PathBuf, cache: bool) -> Result<Self, cuda::Error> {
         extern "C" {
             fn create_SRS(srs_path: *const std::os::raw::c_char, cache: bool) -> SRS;
         }
         let c_srs_path = std::ffi::CString::new(srs_path.to_str().unwrap()).unwrap();
 
-        Ok(unsafe { create_SRS(c_srs_path.as_ptr(), true) })
+        Ok(unsafe { create_SRS(c_srs_path.as_ptr(), cache) })
     }
 }
 

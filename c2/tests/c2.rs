@@ -49,7 +49,7 @@ fn run_seal() {
     let param_file_path = groth_params.param_file_path.clone();
 
     println!("Reading SRS file {:?}", param_file_path);
-    let _srs = match supraseal_c2::SRS::try_new(param_file_path) {
+    let _srs = match supraseal_c2::SRS::try_new(param_file_path, true) {
         Ok(srs) => srs,
         Err(err) => panic!(
             "Failed to read SRS file with message: {}",
