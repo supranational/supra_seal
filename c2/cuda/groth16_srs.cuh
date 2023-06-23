@@ -396,8 +396,19 @@ public:
     void evict() const { SRS::cache().evict(ptr->srs.path.c_str()); }
 };
 
-extern "C" SRS::by_value create_SRS(const char* srs_path, bool cache)
-{   return cache ? SRS::cache().lookup(srs_path) : SRS{srs_path};   }
+extern "C" RustError::by_value create_SRS(SRS& ret, const char* srs_path, bool cache)
+{
+    try {
+        ret = cache ? SRS::cache().lookup(srs_path) : SRS{srs_path};
+        return RustError{cudaSuccess};
+    } catch (const cuda_error& e) {
+#ifdef TAKE_RESPONSIBILITY_FOR_ERROR_MESSAGE
+        return RustError{e.code(), e.what()};
+#else
+        return RustError{e.code()};
+#endif
+    }
+}
 
 extern "C" void evict_SRS(const SRS& ref)
 {   ref.evict();   }

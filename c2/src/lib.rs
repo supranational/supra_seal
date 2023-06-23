@@ -9,14 +9,32 @@ pub struct SRS {
     ptr: *const core::ffi::c_void,
 }
 
+impl Default for SRS {
+    fn default() -> Self {
+        Self {
+            ptr: core::ptr::null(),
+        }
+    }
+}
+
 impl SRS {
     pub fn try_new(srs_path: PathBuf, cache: bool) -> Result<Self, cuda::Error> {
         extern "C" {
-            fn create_SRS(srs_path: *const std::os::raw::c_char, cache: bool) -> SRS;
+            fn create_SRS(
+                ret: &mut SRS,
+                srs_path: *const std::os::raw::c_char,
+                cache: bool,
+            ) -> cuda::Error;
         }
         let c_srs_path = std::ffi::CString::new(srs_path.to_str().unwrap()).unwrap();
 
-        Ok(unsafe { create_SRS(c_srs_path.as_ptr(), cache) })
+        let mut ret = SRS::default();
+        let err = unsafe { create_SRS(&mut ret, c_srs_path.as_ptr(), cache) };
+        if err.code != 0 {
+            Err(err)
+        } else {
+            Ok(ret)
+        }
     }
 
     pub fn evict(&self) {
