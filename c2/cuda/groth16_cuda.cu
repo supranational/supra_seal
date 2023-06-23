@@ -258,7 +258,7 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
 
                     bool b_g1_dense = b_map & 1;
 
-                    if (i < points_a.skip) {
+                    if (a_cursor < points_a.skip) {
                         if (c == 0)
                             tail_msm_a_bases[a_cursor] = points_a[points_a_cursor];
                         tail_msm_a_scalars[a_cursor] = scalar;
