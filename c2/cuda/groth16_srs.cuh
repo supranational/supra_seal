@@ -392,13 +392,15 @@ public:
         static SRS_cache da_cache;
         return da_cache;
     }
+
+    void evict() const { SRS::cache().evict(ptr->srs.path.c_str()); }
 };
 
 extern "C" SRS::by_value create_SRS(const char* srs_path, bool cache)
 {   return cache ? SRS::cache().lookup(srs_path) : SRS{srs_path};   }
 
-extern "C" void evict_SRS(const char* srs_path)
-{   SRS::cache().evict(srs_path);   }
+extern "C" void evict_SRS(const SRS& ref)
+{   ref.evict();   }
 
 extern "C" void drop_SRS(SRS& ref)
 {   ref.~SRS();   }

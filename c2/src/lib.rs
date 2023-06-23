@@ -18,6 +18,13 @@ impl SRS {
 
         Ok(unsafe { create_SRS(c_srs_path.as_ptr(), cache) })
     }
+
+    pub fn evict(&self) {
+        extern "C" {
+            fn evict_SRS(by_ref: &SRS);
+        }
+        unsafe { evict_SRS(self) };
+    }
 }
 
 impl Drop for SRS {
