@@ -243,42 +243,33 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
             auto* aux_assignment = aux_assignments[c];
             auto* inp_assignment = inp_assignments[c];
 
-            size_t points_a_cursor = 0, points_b_cursor = 0;
-            size_t l_cursor = 0;
             size_t a_cursor = 0;
             size_t b_cursor = 0;
 
             for (size_t i = 0; i < inp_size; i += CHUNK_BITS) {
                 size_t chunk_bits = std::min(CHUNK_BITS, inp_size - i);
-
                 uint64_t b_map = msm_l_a_b_g1_b_g2_inputs.density_map_inp[i / CHUNK_BITS];
 
-                for (size_t j = 0; j < chunk_bits; j++) {
+                for (size_t j = 0; j < chunk_bits; j++, b_map >>= 1) {
                     const fr_t& scalar = inp_assignment[i + j];
 
-                    bool b_g1_dense = b_map & 1;
-
-                    if (a_cursor < points_a.skip) {
-                        if (c == 0)
-                            tail_msm_a_bases[a_cursor] = points_a[points_a_cursor];
-                        tail_msm_a_scalars[a_cursor] = scalar;
-                        a_cursor++;
-                        points_a_cursor++;
-                    }
-
                     if (b_cursor < points_b_g1.skip) {
-                        if (b_g1_dense) {
+                        if (b_map & 1) {
                             if (c == 0) {
-                                tail_msm_b_g1_bases[b_cursor] = points_b_g1[points_b_cursor];
-                                tail_msm_b_g2_bases[b_cursor] = points_b_g2[points_b_cursor];
+                                tail_msm_b_g1_bases[b_cursor] = points_b_g1[b_cursor];
+                                tail_msm_b_g2_bases[b_cursor] = points_b_g2[b_cursor];
                             }
                             tail_msm_b_scalars[b_cursor] = scalar;
                             b_cursor++;
-                            points_b_cursor++;
                         }
                     }
 
-                    b_map >>= 1;
+                    if (a_cursor < points_a.skip) {
+                        if (c == 0)
+                            tail_msm_a_bases[a_cursor] = points_a[a_cursor];
+                        tail_msm_a_scalars[a_cursor] = scalar;
+                        a_cursor++;
+                    }
                 }
             }
 
@@ -290,6 +281,8 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
             uint64_t a_bits = 0, b_bits = 0;
             uint32_t a_bit_off = 0, b_bit_off = 0;
             size_t a_bits_cursor = 0, b_bits_cursor = 0;
+            size_t points_a_cursor = a_cursor, points_b_cursor = b_cursor;
+            size_t l_cursor = 0;
 
             for (size_t i = 0; i < aux_size; i += CHUNK_BITS) {
                 uint64_t a_map = points_a.density_map[i / CHUNK_BITS];
