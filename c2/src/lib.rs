@@ -252,6 +252,17 @@ pub struct Assignment<Scalar> {
     pub aux_assignment_size: usize,
 }
 
+extern "C" {
+    fn generate_groth16_proofs_c(
+        provers: *const core::ffi::c_void,
+        num_circuits: usize,
+        r_s: *const core::ffi::c_void,
+        s_s: *const core::ffi::c_void,
+        proofs: *mut core::ffi::c_void,
+        srs: &SRS,
+    ) -> cuda::Error;
+}
+
 pub fn generate_groth16_proofs<S, PR>(
     provers: &[Assignment<S>],
     r_s: &[S],
@@ -260,82 +271,18 @@ pub fn generate_groth16_proofs<S, PR>(
     srs: &SRS,
 ) {
     let num_circuits = provers.len();
-    let abc_size = provers[0].abc_size;
-    let lg_domain_size =
-        (std::mem::size_of_val(&abc_size) * 8) - (abc_size - 1).leading_zeros() as usize;
 
     assert_eq!(r_s.len(), num_circuits);
     assert_eq!(s_s.len(), num_circuits);
     assert_eq!(proofs.len(), num_circuits);
 
-    let ntt_a_scalars: Vec<_> = provers.iter().map(|p| p.a).collect();
-    let ntt_b_scalars: Vec<_> = provers.iter().map(|p| p.b).collect();
-    let ntt_c_scalars: Vec<_> = provers.iter().map(|p| p.c).collect();
-
-    let ntt_msm_h_inputs = ntt_msm_h_inputs_c {
-        h: None.into(),
-        a: ntt_a_scalars.as_ptr() as *const *const _,
-        b: ntt_b_scalars.as_ptr() as *const *const _,
-        c: ntt_c_scalars.as_ptr() as *const *const _,
-        lg_domain_size: lg_domain_size,
-        actual_size: abc_size,
-    };
-
-    let points_l = points_c {
-        points: None.into(),
-        size: provers[0].aux_assignment_size,
-        skip: 0usize,
-        density_map: std::ptr::null() as *const _, // l always has FullDensity
-        total_density: provers[0].aux_assignment_size,
-    };
-
-    let points_a = points_c {
-        points: None.into(),
-        size: provers[0].a_aux_popcount + provers[0].inp_assignment_size,
-        skip: provers[0].inp_assignment_size,
-        density_map: provers[0].a_aux_density as *const _,
-        total_density: provers[0].a_aux_popcount,
-    };
-
-    let points_b_g1 = points_c {
-        points: None.into(),
-        size: provers[0].b_aux_popcount + provers[0].b_inp_popcount,
-        skip: provers[0].b_inp_popcount,
-        density_map: provers[0].b_aux_density as *const _,
-        total_density: provers[0].b_aux_popcount,
-    };
-
-    let points_b_g2 = points_c {
-        points: None.into(),
-        size: provers[0].b_aux_popcount + provers[0].b_inp_popcount,
-        skip: provers[0].b_inp_popcount,
-        density_map: provers[0].b_aux_density as *const _,
-        total_density: provers[0].b_aux_popcount,
-    };
-
-    let inp_assignments: Vec<_> = provers.iter().map(|p| p.inp_assignment_data).collect();
-    let aux_assignments: Vec<_> = provers.iter().map(|p| p.aux_assignment_data).collect();
-
-    let msm_l_a_b_g1_b_g2_inputs = msm_l_a_b_g1_b_g2_inputs_c {
-        points_l: points_l,
-        points_a: points_a,
-        points_b_g1: points_b_g1,
-        points_b_g2: points_b_g2,
-        density_map_inp: provers[0].b_inp_density as *const _,
-        input_assignments: inp_assignments.as_ptr() as *const *const _,
-        aux_assignments: aux_assignments.as_ptr() as *const *const _,
-        input_assignment_size: provers[0].inp_assignment_size,
-        aux_assignment_size: provers[0].aux_assignment_size,
-    };
-
     let err = unsafe {
-        generate_groth16_proof_c(
-            &ntt_msm_h_inputs,
-            &msm_l_a_b_g1_b_g2_inputs,
+        generate_groth16_proofs_c(
+            provers.as_ptr() as *const _,
             num_circuits,
-            r_s.as_ptr() as *const core::ffi::c_void,
-            s_s.as_ptr() as *const core::ffi::c_void,
-            proofs.as_mut_ptr() as *mut core::ffi::c_void,
+            r_s.as_ptr() as *const _,
+            s_s.as_ptr() as *const _,
+            proofs.as_mut_ptr() as *mut _,
             srs,
         )
     };

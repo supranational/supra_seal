@@ -70,6 +70,9 @@ private:
             NTT::Type::coset, stream);
     }
 
+    static int lg2(size_t n)
+    {   int ret = 0; while (n >>= 1) ret++; return ret;   }
+
 public:
 
     // a, b, c = coset_ntt(intt(a, b, c))
@@ -126,6 +129,57 @@ public:
         size_t npoints = domain_size - 1;
         msm_t<bucket_t, point_t, affine_t, fr_t> msm(nullptr, npoints);
         msm.invoke(msm_results_h[circuit], inputs.points_h, npoints, d_a, true);
+    }
+
+    static void execute_ntt_msm_h(const gpu_t& gpu, gpu_ptr_t<fr_t> d_a,
+                                  const Assignment<fr_t>& input,
+                                  const affine_t points_h[],
+                                  point_t& result_h)
+    {
+        size_t actual_size = input.abc_size;
+        size_t lg_domain_size = lg2(actual_size - 1) + 1;
+        size_t domain_size = (size_t)1 << lg_domain_size;
+
+        fr_t z_inv = calculate_z_inv(lg_domain_size);
+
+        int sm_count = gpu.props().multiProcessorCount;
+
+        bool lot_of_memory = 3 * domain_size * sizeof(fr_t) <
+                             gpu.props().totalGlobalMem - gib;
+        {
+            dev_ptr_t<fr_t> d_b(domain_size * (lot_of_memory + 1));
+            fr_t* d_c = &d_b[domain_size * lot_of_memory];
+
+            event_t sync_event;
+
+            execute_ntts_single(&d_a[0], input.a, lg_domain_size,
+                                actual_size, gpu[0]);
+            sync_event.record(gpu[0]);
+
+            execute_ntts_single(&d_b[0], input.b, lg_domain_size,
+                                actual_size, gpu[1]);
+
+            sync_event.wait(gpu[1]);
+            coeff_wise_mult<<<sm_count, 1024, 0, gpu[1]>>>
+                (&d_a[0], &d_b[0], (index_t)lg_domain_size);
+            sync_event.record(gpu[1]);
+
+            execute_ntts_single(&d_c[0], input.c, lg_domain_size,
+                                actual_size, gpu[1 + lot_of_memory]);
+
+            sync_event.wait(gpu[1 + lot_of_memory]);
+            sub_mult_with_constant<<<sm_count, 1024, 0, gpu[1 + lot_of_memory]>>>
+                (&d_a[0], &d_c[0], z_inv, (index_t)lg_domain_size);
+        }
+
+        NTT_internal(&d_a[0], lg_domain_size, NTT::InputOutputOrder::NN,
+            NTT::Direction::inverse, NTT::Type::coset, gpu[1 + lot_of_memory]);
+
+        gpu[1 + lot_of_memory].sync();
+
+        size_t npoints = domain_size - 1;
+        msm_t<bucket_t, point_t, affine_t, fr_t> msm(nullptr, npoints);
+        msm.invoke(result_h, points_h, npoints, d_a, true);
     }
 };
 
