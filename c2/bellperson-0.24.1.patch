@@ -70,7 +70,7 @@ index 0afb4f2..b076c89 100644
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..1876b2e 100644
+index 49c3c20..afab181 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
 @@ -256,7 +256,11 @@ where
@@ -99,7 +99,7 @@ index 49c3c20..1876b2e 100644
  }
  
  #[allow(clippy::type_complexity)]
-@@ -786,3 +794,146 @@ mod tests {
+@@ -786,3 +794,154 @@ mod tests {
          }
      }
  }
@@ -133,18 +133,11 @@ index 49c3c20..1876b2e 100644
 +    let start = Instant::now();
 +    info!("starting proof timer");
 +
-+    let input_assignment_len = provers[0].input_assignment.len();
-+    let aux_assignment_len = provers[0].aux_assignment.len();
 +    let n = provers[0].a.len();
 +    let a_aux_density_total = provers[0].a_aux_density.get_total_density();
 +    let b_input_density_total = provers[0].b_input_density.get_total_density();
 +    let b_aux_density_total = provers[0].b_aux_density.get_total_density();
 +    let num_circuits = provers.len();
-+
-+    let (r_s, s_s) = randomization.unwrap_or((
-+        vec![E::Fr::zero(); num_circuits],
-+        vec![E::Fr::zero(); num_circuits],
-+    ));
 +
 +    // Make sure all circuits have the same input len.
 +    for prover in &provers {
@@ -170,39 +163,54 @@ index 49c3c20..1876b2e 100644
 +        );
 +    }
 +
-+    let mut input_assignments_ref = Vec::with_capacity(num_circuits);
-+    let mut aux_assignments_ref = Vec::with_capacity(num_circuits);
-+    let mut a_ref = Vec::with_capacity(num_circuits);
-+    let mut b_ref = Vec::with_capacity(num_circuits);
-+    let mut c_ref = Vec::with_capacity(num_circuits);
++    impl<Scalar> Into<supraseal_c2::Assignment<Scalar>> for &ProvingAssignment<Scalar>
++    where
++        Scalar: PrimeField,
++    {
++        fn into(self) -> supraseal_c2::Assignment<Scalar> {
++            assert_eq!(self.a.len(), self.b.len());
++            assert_eq!(self.a.len(), self.c.len());
 +
-+    for i in 0..num_circuits {
-+        input_assignments_ref.push(provers[i].input_assignment.as_ptr());
-+        aux_assignments_ref.push(provers[i].aux_assignment.as_ptr());
-+        a_ref.push(provers[i].a.as_ptr());
-+        b_ref.push(provers[i].b.as_ptr());
-+        c_ref.push(provers[i].c.as_ptr());
++            supraseal_c2::Assignment::<Scalar> {
++                a_aux_density: self.a_aux_density.bv.as_raw_slice().as_ptr(),
++                a_aux_bit_len: self.a_aux_density.bv.len(),
++                a_aux_popcount: self.a_aux_density.get_total_density(),
++
++                b_inp_density: self.b_input_density.bv.as_raw_slice().as_ptr(),
++                b_inp_bit_len: self.b_input_density.bv.len(),
++                b_inp_popcount: self.b_input_density.get_total_density(),
++
++                b_aux_density: self.b_aux_density.bv.as_raw_slice().as_ptr(),
++                b_aux_bit_len: self.b_aux_density.bv.len(),
++                b_aux_popcount: self.b_aux_density.get_total_density(),
++
++                a: self.a.as_ptr(),
++                b: self.b.as_ptr(),
++                c: self.c.as_ptr(),
++                abc_size: self.a.len(),
++
++                inp_assignment_data: self.input_assignment.as_ptr(),
++                inp_assignment_size: self.input_assignment.len(),
++
++                aux_assignment_data: self.aux_assignment.as_ptr(),
++                aux_assignment_size: self.aux_assignment.len(),
++            }
++        }
 +    }
++
++    let provers_c2: Vec<supraseal_c2::Assignment<E::Fr>> =
++        provers.iter().map(|p| p.into()).collect();
++
++    let (r_s, s_s) = randomization.unwrap_or((
++        vec![E::Fr::zero(); num_circuits],
++        vec![E::Fr::zero(); num_circuits],
++    ));
 +
 +    let mut proofs: Vec<Proof<E>> = Vec::with_capacity(num_circuits);
 +    unsafe { proofs.set_len(num_circuits) };
 +
-+    supraseal_c2::generate_groth16_proof(
-+        a_ref.as_slice(),
-+        b_ref.as_slice(),
-+        c_ref.as_slice(),
-+        provers[0].a.len(),
-+        input_assignments_ref.as_slice(),
-+        aux_assignments_ref.as_slice(),
-+        input_assignment_len,
-+        aux_assignment_len,
-+        provers[0].a_aux_density.bv.as_raw_slice(),
-+        provers[0].b_input_density.bv.as_raw_slice(),
-+        provers[0].b_aux_density.bv.as_raw_slice(),
-+        a_aux_density_total,
-+        b_input_density_total,
-+        b_aux_density_total,
-+        num_circuits,
++    supraseal_c2::generate_groth16_proofs(
++        provers_c2.as_slice(),
 +        r_s.as_slice(),
 +        s_s.as_slice(),
 +        proofs.as_mut_slice(),
