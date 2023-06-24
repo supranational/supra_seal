@@ -48,7 +48,7 @@ struct batch_add_results {
 template<typename T> class uninit {
     T val;
 public:
-    uninit()            { } // don't zero std::vector<mask_t>
+    uninit()            { } // don't zero std::vector<uninit<T>>
     uninit(T v)         { val = v; }
     operator T() const  { return val; }
 };
@@ -96,7 +96,7 @@ template<class bucket_t,
          class affine_h = class bucket_t::affine_t::mem_t>
 void execute_batch_addition(const gpu_t& gpu,
                             size_t curcuit0, size_t num_circuits,
-                            const points_c<affine_t>& points,
+                            const affine_t points[], size_t npoints,
                             const split_vectors& split_vector,
                             point_t batch_add_res[])
 {
@@ -127,13 +127,11 @@ void execute_batch_addition(const gpu_t& gpu,
                       split_vector.bit_vector[curcuit0 + c].data(),
                       split_vector.bit_vector[curcuit0 + c].size());
 
-    size_t remaining_points = points.size - points.skip;
-
-    for (uint32_t batch = 0; remaining_points > 0; batch++, sid ^= 1) {
-        uint32_t amount = std::min(remaining_points, batch_size);
+    for (uint32_t batch = 0; npoints > 0; batch++, sid ^= 1) {
+        uint32_t amount = std::min(npoints, batch_size);
         size_t cursor = batch * batch_size;
 
-        gpu[sid].HtoD(d_points[sid], &points[cursor + points.skip], amount);
+        gpu[sid].HtoD(d_points[sid], &points[cursor], amount);
 
         for (size_t c = 0; c < num_circuits; c++)
             gpu[sid].launch_coop(batch_addition<bucket_t>,
@@ -142,7 +140,7 @@ void execute_batch_addition(const gpu_t& gpu,
                 (const uint32_t*)&d_bit_vectors[c][cursor / CHUNK_BITS],
                 batch > 0, sid);
 
-        remaining_points -= amount;
+        npoints -= amount;
     }
     sid ^= 1;
 

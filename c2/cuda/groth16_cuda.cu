@@ -425,28 +425,35 @@ RustError generate_groth16_proof_c(const ntt_msm_h_inputs_c& ntt_msm_h_inputs,
 
                 // batch addition L - on GPU
                 execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
-                                                 points_l, split_vectors_l,
+                                                 &points_l[0], points_l.size,
+                                                 split_vectors_l,
                                                  &batch_add_res.l[circuit0]);
                 if (caught_exception)
                     return;
 
                 // batch addition a - on GPU
                 execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
-                                                 points_a, split_vectors_a,
+                                                 &points_a[points_a.skip],
+                                                 points_a.size - points_a.skip,
+                                                 split_vectors_a,
                                                  &batch_add_res.a[circuit0]);
                 if (caught_exception)
                     return;
 
                 // batch addition b_g1 - on GPU
                 execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
-                                                 points_b_g1, split_vectors_b,
+                                                 &points_b_g1[points_b_g1.skip],
+                                                 points_b_g1.size - points_b_g1.skip,
+                                                 split_vectors_b,
                                                  &batch_add_res.b_g1[circuit0]);
                 if (caught_exception)
                     return;
 
                 // batch addition b_g2 - on GPU
                 execute_batch_addition<bucket_fp2_t>(gpu, circuit0, num_circuits,
-                                                     points_b_g2, split_vectors_b,
+                                                     &points_b_g2[points_b_g2.skip],
+                                                     points_b_g2.size - points_b_g2.skip,
+                                                     split_vectors_b,
                                                      &batch_add_res.b_g2[circuit0]);
                 if (caught_exception)
                     return;
