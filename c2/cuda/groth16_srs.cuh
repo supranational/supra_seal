@@ -17,6 +17,17 @@ struct verifying_key {
     affine_fp2_t delta_g2;
 };
 
+template<typename T> class slice_t {
+    T* ptr;
+    size_t nelems;
+public:
+    slice_t(void *p, size_t n) : ptr(reinterpret_cast<T*>(p)), nelems(n) {}
+    slice_t() : ptr(nullptr), nelems(0) {}
+    T* data() const                     { return ptr; }
+    size_t size() const                 { return nelems; }
+    T& operator[](size_t i) const       { return ptr[i]; }
+};
+
 extern "C" {
     int blst_p1_deserialize(affine_t*, const byte[96]);
     int blst_p2_deserialize(affine_fp2_t*, const byte[192]);
@@ -140,17 +151,6 @@ private:
 
         std::string path;
         verifying_key vk;
-
-        template<typename T> class slice_t {
-            T* ptr;
-            size_t nelems;
-        public:
-            slice_t(void *p, size_t n) : ptr(reinterpret_cast<T*>(p)), nelems(n) {}
-            slice_t() : ptr(nullptr), nelems(0) {}
-            T* data() const                     { return ptr; }
-            size_t size() const                 { return nelems; }
-            T& operator[](size_t i) const       { return ptr[i]; }
-        };
 
 #if 0
 #define H_IS_STD__VECTOR
@@ -336,6 +336,31 @@ public:
     const affine_fp2_t* get_b_g2() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
         return ptr->srs.b_g2.data();
+    }
+
+    const slice_t<affine_t>& get_h_slice() const {
+        std::lock_guard<std::mutex> guard(ptr->srs.mtx);
+        return ptr->srs.h;
+    }
+
+    const slice_t<affine_t>& get_l_slice() const {
+        std::lock_guard<std::mutex> guard(ptr->srs.mtx);
+        return ptr->srs.l;
+    }
+
+    const slice_t<affine_t>& get_a_slice() const {
+        std::lock_guard<std::mutex> guard(ptr->srs.mtx);
+        return ptr->srs.a;
+    }
+
+    const slice_t<affine_t>& get_b_g1_slice() const {
+        std::lock_guard<std::mutex> guard(ptr->srs.mtx);
+        return ptr->srs.b_g1;
+    }
+
+    const slice_t<affine_fp2_t>& get_b_g2_slice() const {
+        std::lock_guard<std::mutex> guard(ptr->srs.mtx);
+        return ptr->srs.b_g2;
     }
 
     const std::string& get_path() const {
