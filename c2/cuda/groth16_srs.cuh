@@ -22,6 +22,7 @@ template<typename T> class slice_t {
     size_t nelems;
 public:
     slice_t(void *p, size_t n) : ptr(reinterpret_cast<T*>(p)), nelems(n) {}
+    slice_t(const T* p, size_t n) : ptr(const_cast<T*>(p)), nelems(n) {}
     slice_t() : ptr(nullptr), nelems(0) {}
     T* data() const                     { return ptr; }
     size_t size() const                 { return nelems; }
@@ -338,9 +339,9 @@ public:
         return ptr->srs.b_g2.data();
     }
 
-    const slice_t<affine_t>& get_h_slice() const {
+    const slice_t<affine_t> get_h_slice() const {
         std::lock_guard<std::mutex> guard(ptr->srs.mtx);
-        return ptr->srs.h;
+        return {ptr->srs.h.data(), ptr->srs.h.size()};
     }
 
     const slice_t<affine_t>& get_l_slice() const {
