@@ -949,12 +949,13 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
 
             try {
                 {
-                    size_t d_a_sz = sizeof(fr_t) << (lg2(provers[0].abc_size - 1) + 1);
+                    size_t d_a_sz = sizeof(fr_t) << (lg2(points_h.size() - 1) + 1);
                     gpu_ptr_t<fr_t> d_a{(scalar_t*)gpu.Dmalloc(d_a_sz)};
 
                     for (size_t c = circuit0; c < circuit0 + num_circuits; c++) {
                         ntt_msm_h::execute_ntt_msm_h(gpu, d_a, provers[c],
-                                                     &points_h[0], results.h[c]);
+                                                     points_h.data(), points_h.size(),
+                                                     results.h[c]);
                         if (caught_exception)
                             return;
                     }
