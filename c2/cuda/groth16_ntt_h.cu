@@ -133,11 +133,11 @@ public:
 
     static void execute_ntt_msm_h(const gpu_t& gpu, gpu_ptr_t<fr_t> d_a,
                                   const Assignment<fr_t>& input,
-                                  const affine_t points_h[],
+                                  const affine_t points_h[], size_t npoints,
                                   point_t& result_h)
     {
         size_t actual_size = input.abc_size;
-        size_t lg_domain_size = lg2(actual_size - 1) + 1;
+        size_t lg_domain_size = lg2(npoints - 1) + 1;
         size_t domain_size = (size_t)1 << lg_domain_size;
 
         fr_t z_inv = calculate_z_inv(lg_domain_size);
@@ -177,7 +177,6 @@ public:
 
         gpu[1 + lot_of_memory].sync();
 
-        size_t npoints = domain_size - 1;
         msm_t<bucket_t, point_t, affine_t, fr_t> msm(nullptr, npoints);
         msm.invoke(result_h, points_h, npoints, d_a, true);
     }
