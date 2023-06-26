@@ -645,7 +645,6 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                 uint64_t b_map = prover.b_inp_density[i / CHUNK_BITS];
                 uint64_t map_mask = 1;
                 size_t chunk_bits = std::min(CHUNK_BITS, inp_size - i);
-                a_bits = 0;
 
                 for (size_t j = 0; j < chunk_bits; j++, map_mask <<= 1) {
                     a_bits |= map_mask;
@@ -661,6 +660,8 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                 }
 
                 a_bit_vector[i / CHUNK_BITS] = a_bits;
+                if (chunk_bits == CHUNK_BITS)
+                    a_bits = 0;
             }
 
             a_bits_cursor = inp_size / CHUNK_BITS;
