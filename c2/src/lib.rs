@@ -67,50 +67,6 @@ impl Clone for SRS {
 unsafe impl Sync for SRS {}
 unsafe impl Send for SRS {}
 
-#[repr(C)]
-struct points_c {
-    points: core::cell::Cell<Option<core::ptr::NonNull<i8>>>,
-    size: usize,
-    skip: usize,
-    density_map: *const u64,
-    total_density: usize,
-}
-
-#[repr(C)]
-struct ntt_msm_h_inputs_c {
-    h: core::cell::Cell<Option<core::ptr::NonNull<i8>>>,
-    a: *const *const core::ffi::c_void,
-    b: *const *const core::ffi::c_void,
-    c: *const *const core::ffi::c_void,
-    lg_domain_size: usize,
-    actual_size: usize, // this value is very close to a power of 2
-}
-
-#[repr(C)]
-struct msm_l_a_b_g1_b_g2_inputs_c {
-    points_l: points_c,
-    points_a: points_c,
-    points_b_g1: points_c,
-    points_b_g2: points_c,
-    density_map_inp: *const u64,
-    input_assignments: *const *const core::ffi::c_void,
-    aux_assignments: *const *const core::ffi::c_void,
-    input_assignment_size: usize,
-    aux_assignment_size: usize,
-}
-
-extern "C" {
-    fn generate_groth16_proof_c(
-        ntt_msm_h_inputs: &ntt_msm_h_inputs_c,
-        msm_l_a_b_g1_b_g2_inputs: &msm_l_a_b_g1_b_g2_inputs_c,
-        num_circuits: usize,
-        r_s: *const core::ffi::c_void,
-        s_s: *const core::ffi::c_void,
-        proofs: *mut core::ffi::c_void,
-        srs: &SRS,
-    ) -> cuda::Error;
-}
-
 pub fn generate_groth16_proof<S, D, PR>(
     ntt_a_scalars: &[*const S],
     ntt_b_scalars: &[*const S],
@@ -132,9 +88,6 @@ pub fn generate_groth16_proof<S, D, PR>(
     proofs: &mut [PR],
     srs: &SRS,
 ) {
-    let lg_domain_size = (std::mem::size_of_val(&ntt_scalars_actual_size) * 8)
-        - (ntt_scalars_actual_size - 1).leading_zeros() as usize;
-
     assert_eq!(ntt_a_scalars.len(), num_circuits);
     assert_eq!(ntt_b_scalars.len(), num_circuits);
     assert_eq!(ntt_c_scalars.len(), num_circuits);
@@ -153,67 +106,43 @@ pub fn generate_groth16_proof<S, D, PR>(
     assert!(a_aux_density_bv.len() * bv_element_size >= aux_assignments_size);
     assert!(b_g1_aux_density_bv.len() * bv_element_size >= aux_assignments_size);
 
-    let ntt_msm_h_inputs = ntt_msm_h_inputs_c {
-        h: None.into(),
-        a: ntt_a_scalars.as_ptr() as *const *const _,
-        b: ntt_b_scalars.as_ptr() as *const *const _,
-        c: ntt_c_scalars.as_ptr() as *const *const _,
-        lg_domain_size: lg_domain_size,
-        actual_size: ntt_scalars_actual_size,
-    };
+    let provers: Vec<_> = (0..num_circuits)
+        .map(|c| Assignment::<S> {
+            // Density of queries
+            a_aux_density: a_aux_density_bv.as_ptr() as *const _,
+            a_aux_bit_len: aux_assignments_size,
+            a_aux_popcount: a_aux_total_density,
 
-    let points_l = points_c {
-        points: None.into(),
-        size: aux_assignments_size,
-        skip: 0usize,
-        density_map: std::ptr::null() as *const _, // l always has FullDensity
-        total_density: aux_assignments_size,
-    };
+            b_inp_density: b_g1_input_density_bv.as_ptr() as *const _,
+            b_inp_bit_len: input_assignments_size,
+            b_inp_popcount: b_g1_input_total_density,
 
-    let points_a = points_c {
-        points: None.into(),
-        size: a_aux_total_density + input_assignments_size,
-        skip: input_assignments_size,
-        density_map: a_aux_density_bv.as_ptr() as *const _,
-        total_density: a_aux_total_density,
-    };
+            b_aux_density: b_g1_aux_density_bv.as_ptr() as *const _,
+            b_aux_bit_len: aux_assignments_size,
+            b_aux_popcount: b_g1_aux_total_density,
 
-    let points_b_g1 = points_c {
-        points: None.into(),
-        size: b_g1_aux_total_density + b_g1_input_total_density,
-        skip: b_g1_input_total_density,
-        density_map: b_g1_aux_density_bv.as_ptr() as *const _,
-        total_density: b_g1_aux_total_density,
-    };
+            // Evaluations of A, B, C polynomials
+            a: ntt_a_scalars[c],
+            b: ntt_b_scalars[c],
+            c: ntt_c_scalars[c],
+            abc_size: ntt_scalars_actual_size,
 
-    let points_b_g2 = points_c {
-        points: None.into(),
-        size: b_g1_aux_total_density + b_g1_input_total_density,
-        skip: b_g1_input_total_density,
-        density_map: b_g1_aux_density_bv.as_ptr() as *const _,
-        total_density: b_g1_aux_total_density,
-    };
+            // Assignments of variables
+            inp_assignment_data: input_assignments[c],
+            inp_assignment_size: input_assignments_size,
 
-    let msm_l_a_b_g1_b_g2_inputs = msm_l_a_b_g1_b_g2_inputs_c {
-        points_l: points_l,
-        points_a: points_a,
-        points_b_g1: points_b_g1,
-        points_b_g2: points_b_g2,
-        density_map_inp: b_g1_input_density_bv.as_ptr() as *const _,
-        input_assignments: input_assignments.as_ptr() as *const *const _,
-        aux_assignments: aux_assignments.as_ptr() as *const *const _,
-        input_assignment_size: input_assignments_size,
-        aux_assignment_size: aux_assignments_size,
-    };
+            aux_assignment_data: aux_assignments[c],
+            aux_assignment_size: aux_assignments_size,
+        })
+        .collect();
 
     let err = unsafe {
-        generate_groth16_proof_c(
-            &ntt_msm_h_inputs,
-            &msm_l_a_b_g1_b_g2_inputs,
+        generate_groth16_proofs_c(
+            provers.as_ptr() as *const _,
             num_circuits,
-            r_s.as_ptr() as *const core::ffi::c_void,
-            s_s.as_ptr() as *const core::ffi::c_void,
-            proofs.as_mut_ptr() as *mut core::ffi::c_void,
+            r_s.as_ptr() as *const _,
+            s_s.as_ptr() as *const _,
+            proofs.as_mut_ptr() as *mut _,
             srs,
         )
     };
