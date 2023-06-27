@@ -14,25 +14,6 @@ void batch_addition<bucket_fp2_t>(bucket_fp2_t::mem_t ret_[],
                                   uint32_t npoints, const uint32_t bitmap[],
                                   bool accumulate, uint32_t sid);
 
-template<class affine_t>
-struct points_c {
-    mutable const affine_t* points;
-    size_t size;
-    size_t skip;
-    const uint64_t* density_map;
-    size_t total_density;
-
-    inline const affine_t& operator[](size_t i) const { return points[i]; }
-};
-
-struct msm_l_a_b_g1_b_g2_inputs_c {
-    points_c<affine_t> points_l, points_a, points_b_g1;
-    points_c<affine_fp2_t> points_b_g2;
-    const uint64_t* density_map_inp;
-    const fr_t** input_assignments, ** aux_assignments;
-    size_t input_assignment_size, aux_assignment_size;
-};
-
 struct batch_add_results {
     std::vector<point_t> l;
     std::vector<point_t> a;

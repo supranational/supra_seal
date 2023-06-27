@@ -27,15 +27,6 @@ __global__ void sub_mult_with_constant(fr_t* a, const fr_t* c, fr_t z,
 
 #ifndef __CUDA_ARCH__
 
-struct ntt_msm_h_inputs_c {
-    mutable const affine_t* points_h;
-    const fr_t** a;
-    const fr_t** b;
-    const fr_t** c;
-    size_t lg_domain_size;
-    size_t actual_size;
-};
-
 const size_t gib = (size_t)1 << 30;
 
 class ntt_msm_h : public NTT {
@@ -81,56 +72,6 @@ public:
     // a[i] /= (multiplicative_gen^domain_size) - 1
     // a = coset_intt(a)
     // a is the result vector
-    static void execute_ntt_msm_h(const gpu_t& gpu, gpu_ptr_t<fr_t> d_a,
-                                  const ntt_msm_h_inputs_c& inputs,
-                                  size_t circuit, point_t msm_results_h[])
-    {
-        size_t lg_domain_size = inputs.lg_domain_size;
-        size_t domain_size = (size_t)1 << lg_domain_size;
-
-        fr_t z_inv = calculate_z_inv(lg_domain_size);
-
-        int sm_count = gpu.props().multiProcessorCount;
-
-        bool lot_of_memory = 3 * domain_size * sizeof(fr_t) <
-                             gpu.props().totalGlobalMem - gib;
-        {
-            size_t actual_size = inputs.actual_size;
-            dev_ptr_t<fr_t> d_b(domain_size * (lot_of_memory + 1));
-            fr_t* d_c = &d_b[domain_size * lot_of_memory];
-
-            event_t sync_event;
-
-            execute_ntts_single(&d_a[0], inputs.a[circuit], lg_domain_size,
-                                actual_size, gpu[0]);
-            sync_event.record(gpu[0]);
-
-            execute_ntts_single(&d_b[0], inputs.b[circuit], lg_domain_size,
-                                actual_size, gpu[1]);
-
-            sync_event.wait(gpu[1]);
-            coeff_wise_mult<<<sm_count, 1024, 0, gpu[1]>>>
-                (&d_a[0], &d_b[0], (index_t)lg_domain_size);
-            sync_event.record(gpu[1]);
-
-            execute_ntts_single(&d_c[0], inputs.c[circuit], lg_domain_size,
-                                actual_size, gpu[1 + lot_of_memory]);
-
-            sync_event.wait(gpu[1 + lot_of_memory]);
-            sub_mult_with_constant<<<sm_count, 1024, 0, gpu[1 + lot_of_memory]>>>
-                (&d_a[0], &d_c[0], z_inv, (index_t)lg_domain_size);
-        }
-
-        NTT_internal(&d_a[0], lg_domain_size, NTT::InputOutputOrder::NN,
-            NTT::Direction::inverse, NTT::Type::coset, gpu[1 + lot_of_memory]);
-
-        gpu[1 + lot_of_memory].sync();
-
-        size_t npoints = domain_size - 1;
-        msm_t<bucket_t, point_t, affine_t, fr_t> msm(nullptr, npoints);
-        msm.invoke(msm_results_h[circuit], inputs.points_h, npoints, d_a, true);
-    }
-
     static void execute_ntt_msm_h(const gpu_t& gpu, gpu_ptr_t<fr_t> d_a,
                                   const Assignment<fr_t>& input,
                                   const affine_t points_h[], size_t npoints,
