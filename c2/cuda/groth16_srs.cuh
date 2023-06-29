@@ -146,7 +146,6 @@ private:
             }, get_num_threads());
         }
 
-
         std::thread read_th;
         mutable std::mutex mtx;
 
@@ -178,10 +177,15 @@ private:
                 } h, l, a, b_g1, b_g2;
             } data;
 
+            if (!ngpus()) {
+                throw sppark_error{ENODEV, std::string("No CUDA devices available")};
+            }
+
             int srs_file = open(srs_path, O_RDONLY);
 
-            // TODO, replace asserts with custom exceptions
-            assert(srs_file >= 0);
+            if (srs_file < 0) {
+                throw sppark_error{errno, "open(\"%s\") failed: ", srs_path};
+            }
 
             struct stat st;
             fstat(srs_file, &st);
@@ -189,9 +193,14 @@ private:
 
             const byte* srs_ptr = (const byte*)mmap(NULL, file_size, PROT_READ,
                                                     MAP_PRIVATE, srs_file, 0);
-            assert(srs_ptr != MAP_FAILED);
 
-            close(srs_file);
+            {
+                int err = errno;
+                close(srs_file);
+                if (srs_ptr == MAP_FAILED) {
+                    throw sppark_error{err, "mmap(srs_file) failed: "};
+                }
+            }
 
             size_t cursor = 0;
             cursor += read_g1_point(&vk.alpha_g1, srs_ptr + cursor);
@@ -201,37 +210,58 @@ private:
             cursor += read_g1_point(&vk.delta_g1, srs_ptr + cursor);
             cursor += read_g2_point(&vk.delta_g2, srs_ptr + cursor);
 
-            assert(file_size > cursor + sizeof(uint32_t));
+            if (file_size <= cursor + sizeof(uint32_t)) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
             uint32_t vk_ic_size = from_big_endian<uint32_t>(srs_ptr + cursor);
             cursor += sizeof(uint32_t);
 
             cursor += vk_ic_size * p1_affine_size;
-            assert(file_size > cursor + sizeof(uint32_t));
+            if (file_size <= cursor + sizeof(uint32_t)) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
             data.h.size = from_big_endian<uint32_t>(srs_ptr + cursor);
             data.h.off  = cursor += sizeof(uint32_t);
 
             cursor += data.h.size * p1_affine_size;
-            assert(file_size > cursor + sizeof(uint32_t));
+            if (file_size <= cursor + sizeof(uint32_t)) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
             data.l.size = from_big_endian<uint32_t>(srs_ptr + cursor);
             data.l.off  = cursor += sizeof(uint32_t);
 
             cursor += data.l.size * p1_affine_size;
-            assert(file_size > cursor + sizeof(uint32_t));
+            if (file_size <= cursor + sizeof(uint32_t)) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
             data.a.size = from_big_endian<uint32_t>(srs_ptr + cursor);
             data.a.off  = cursor += sizeof(uint32_t);
 
             cursor += data.a.size * p1_affine_size;
-            assert(file_size > cursor + sizeof(uint32_t));
+            if (file_size <= cursor + sizeof(uint32_t)) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
             data.b_g1.size = from_big_endian<uint32_t>(srs_ptr + cursor);
             data.b_g1.off  = cursor += sizeof(uint32_t);
 
             cursor += data.b_g1.size * p1_affine_size;
-            assert(file_size > cursor + sizeof(uint32_t));
+            if (file_size <= cursor + sizeof(uint32_t)) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
             data.b_g2.size = from_big_endian<uint32_t>(srs_ptr + cursor);
             data.b_g2.off  = cursor += sizeof(uint32_t);
 
             cursor += data.b_g2.size * p1_affine_size;
-            assert(file_size >= cursor);
+            if (file_size < cursor) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
+            }
 
             size_t  l_size  = round_up(data.l.size * sizeof(affine_t)),
                     a_size  = round_up(data.a.size * sizeof(affine_t)),
@@ -242,7 +272,11 @@ private:
             total += round_up(data.h.size * sizeof(affine_t));
 #endif
 
-            CUDA_OK(cudaHostAlloc(&pinned, total, cudaHostAllocPortable));
+            cudaError_t cuda_err = cudaHostAlloc(&pinned, total, cudaHostAllocPortable);
+            if (cuda_err != cudaSuccess) {
+                munmap(const_cast<byte*>(srs_ptr), file_size);
+                CUDA_OK(cuda_err);
+            }
             byte *ptr = reinterpret_cast<byte*>(pinned);
 
             l = slice_t<affine_t>{ptr, data.l.size};            ptr += l_size;
@@ -427,7 +461,7 @@ extern "C" RustError::by_value create_SRS(SRS& ret, const char* srs_path, bool c
     try {
         ret = cache ? SRS::cache().lookup(srs_path) : SRS{srs_path};
         return RustError{cudaSuccess};
-    } catch (const cuda_error& e) {
+    } catch (const sppark_error& e) {
 #ifdef TAKE_RESPONSIBILITY_FOR_ERROR_MESSAGE
         return RustError{e.code(), e.what()};
 #else
