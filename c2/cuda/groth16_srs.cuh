@@ -263,11 +263,11 @@ private:
                 throw sppark_error{EINVAL, std::string("SRS file size/layout mismatch")};
             }
 
-            size_t  l_size  = round_up(data.l.size * sizeof(affine_t)),
-                    a_size  = round_up(data.a.size * sizeof(affine_t)),
-                    b1_size = round_up(data.b_g1.size * sizeof(affine_t)),
-                    b2_size = round_up(data.b_g2.size * sizeof(affine_fp2_t)),
-                    total   = l_size + a_size + b1_size + b2_size;
+            size_t l_size  = round_up(data.l.size * sizeof(affine_t)),
+                   a_size  = round_up(data.a.size * sizeof(affine_t)),
+                   b1_size = round_up(data.b_g1.size * sizeof(affine_t)),
+                   b2_size = round_up(data.b_g2.size * sizeof(affine_fp2_t)),
+                   total   = l_size + a_size + b1_size + b2_size;
 #ifndef H_IS_STD__VECTOR
             total += round_up(data.h.size * sizeof(affine_t));
 #endif
