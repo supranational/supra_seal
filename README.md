@@ -161,13 +161,16 @@ int c1(size_t block_offset,
 
 # Reference Platform
 
-We will specify a reference configuration with the final release of the software. Our current testing configuration consists of:
-- Threadripper PRO 5975WX
+Our reference configuration consists of:
+- Threadripper PRO 5995WX
 - ASUS WRX80E SAGE Motherboard
-- 256GB Memory
-- 15 Samsung 7.68TB U.2 Drives
+- 512GB Memory
+- 16 Samsung 7.68TB U.2 Drives
+- Corsair Dual SSD Mounting Bracket
 - 4 Supermicro AOC-SLG4-4E4T NVMe HBA 
-- Nvidia RTX 4090
+- Nvidia RTX 4090 (Suprim Liquid X)
+- EVGA SuperNOVA 2000 G+
+- Lian Li V3000 Plus Case
 - Ubuntu 22.04
 - SPDK v22.09
 
