@@ -111,6 +111,10 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
     static std::mutex mtx;
     std::lock_guard<std::mutex> lock(mtx);
 
+    if (!ngpus()) {
+        return RustError{ENODEV, "No CUDA devices available"};
+    }
+
     const verifying_key* vk = &srs.get_vk();
 
     auto points_h = srs.get_h_slice();

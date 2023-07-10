@@ -76,7 +76,7 @@ template<class bucket_t,
          class affine_t = class bucket_t::affine_t,
          class affine_h = class bucket_t::affine_t::mem_t>
 void execute_batch_addition(const gpu_t& gpu,
-                            size_t curcuit0, size_t num_circuits,
+                            size_t circuit0, size_t num_circuits,
                             const affine_t points[], size_t npoints,
                             const split_vectors& split_vector,
                             point_t batch_add_res[])
@@ -105,8 +105,8 @@ void execute_batch_addition(const gpu_t& gpu,
 
     for (size_t c = 0; c < num_circuits; c++)
         gpu[sid].HtoD(d_bit_vectors[c],
-                      split_vector.bit_vector[curcuit0 + c].data(),
-                      split_vector.bit_vector[curcuit0 + c].size());
+                      split_vector.bit_vector[circuit0 + c].data(),
+                      split_vector.bit_vector[circuit0 + c].size());
 
     for (uint32_t batch = 0; npoints > 0; batch++, sid ^= 1) {
         uint32_t amount = std::min(npoints, batch_size);
