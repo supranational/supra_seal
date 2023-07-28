@@ -1,7 +1,5 @@
 # SupraSeal
 
-**This repository is under active development and has not been verified for production use on mainnet yet.**
-
 SupraSeal is a highly optimized collection of Filecoin sealing primitives intended to be used by storage providers who require high throughput. The PC1, PC2, C1, and C2 subsections provide more details on usage. Note this is not a standalone library, the primitives are intended to be used in a storage providers application of choice.
 
 # Architecture and Design Considerations
@@ -11,9 +9,9 @@ SupraSeal is a highly optimized collection of Filecoin sealing primitives intend
 For a single sector, the sealing operation is comprised of the following operations: Add Piece, Pre-commit 1, Pre-commit 2, Wait Seed, Commit 1, and Commit 2. In order to maximize application flexibility, SupraSeal is designed to handle a subset of these operations independently. 
 - **Add Piece**: the process of concatenating pieces of data in order to fill a sector (e.g. 32GB). SupraSeal does not address this operation given the trivial compute requirements and large number of possible ways to ingest data.
 - **Pre-commit 1 (PC1)**: the generation of the stacked depth robust graph. SupraSeal parallelizes this operation across a power of 2 number of sectors, up to 128, and is designed to maximize throughput.
-- **Pre-commit 2 (PC2)**: the creation of two merkle trees comprised of the graph columns and replica. SupraSeal supports the generation of tree c across the parallel sectors created by PC1. For Committed Capacity (CC) sectors, SupraSeal supports the parallel generation of tree r. Alternatively for non-CC sectors (customer data), SupraSeal offers GPU and CPU based single sector replica encoding and tree r generation.
+- **Pre-commit 2 (PC2)**: the creation of two Merkle trees comprised of the graph columns and replica. SupraSeal supports the generation of tree c across the parallel sectors created by PC1. For Committed Capacity (CC) sectors, SupraSeal supports the parallel generation of tree r. Alternatively for non-CC sectors (customer data), SupraSeal offers GPU and CPU based single sector replica encoding and tree r generation.
 - **Wait Seed**: the 150 epoch (~75 minute) gap between submission of pre-commit2 and the availability of randomness (seed) from the chain. SupraSeal does not interact with the chain, therefore relies on the application for obtaining the seed.
-- **Commit 1 (C1)**: the generation of node challenges using the seed. SupraSeal will build the inclusion proofs from the parallel layers generated in PC1 and the merkle trees for PC2. The C1 api operates on a single sector at a time, as opposed to PC1 and PC2 which operate on all sectors at once. The reason is each sector will have a different set of challenges, thus making the parallelization less effective. If working with non-CC (customer data) sectors, then tree D and tree R must be provided to SupraSeal. Both trees can be generated using deal data through standalone SupraSeal utilities.
+- **Commit 1 (C1)**: the generation of node challenges using the seed. SupraSeal will build the inclusion proofs from the parallel layers generated in PC1 and the Merkle trees for PC2. The C1 api operates on a single sector at a time, as opposed to PC1 and PC2 which operate on all sectors at once. The reason is each sector will have a different set of challenges, thus making the parallelization less effective. If working with non-CC (customer data) sectors, then tree D and tree R must be provided to SupraSeal. Both trees can be generated using deal data through standalone SupraSeal utilities.
 - **Commit 2 (C2)**: the zkSNARK proof generation using the inclusion proofs from C1. SupraSeal provides the post constraint evaluation portion of the Groth16 proof. There is no complete C2 api within SupraSeal, the expectation is the heavy Groth16 compute function is integrated directly into the existing Filecoin C2 apis.
 
 For a more detailed discussion of PC1 see [pc1/README.md](pc1/README.md).
@@ -192,8 +190,8 @@ rustup default nightly
 ### Enable Huge Pages (1GB):
 ```
 sudo vi /etc/default/grub
-GRUB_CMDLINE_LINUX_DEFAULT="default_hugepagesz=1G hugepagesz=1G hugepages=128"
-GRUB_CMDLINE_LINUX="default_hugepagesz=1G hugepagesz=1G hugepages=128"
+GRUB_CMDLINE_LINUX_DEFAULT="default_hugepagesz=1G hugepagesz=1G hugepages=36"
+GRUB_CMDLINE_LINUX="default_hugepagesz=1G hugepagesz=1G hugepages=36"
 sudo update-grub
 sudo reboot
 ```
@@ -203,11 +201,11 @@ You can confirm huge pages are enabled with:
 grep Huge /proc/meminfo
 
 # Look for:
-HugePages_Total:     128
-HugePages_Free:      128
+HugePages_Total:     36
+HugePages_Free:      36
 ```
 
-Additionally uou may need to enable huge pages after boot using:
+Additionally you may need to enable huge pages after boot using:
 ```
 sudo sysctl -w vm.nr_hugepages=128
 ```
@@ -266,7 +264,7 @@ Empirically we have found it's preferable to consolidate the disks with filesyst
 
 We also use F2FS for the PC2 storage disks, as this is designed specifically for flash based storage. If using ext4 disabling journaling is recommended. 
 
-Finally we recommend mounting the PC2 drives with the `lazytime` option to avoid frequenty meta data updates (`mount -o lazytime`).
+Finally we recommend mounting the PC2 drives with the `lazytime` option to avoid frequent meta data updates (`mount -o lazytime`).
 
 # Running
 
