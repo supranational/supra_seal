@@ -13,6 +13,6 @@ The use of bellperson currently complicates matters since the library needs to b
 1. Clone version `0.24.1` of [bellperson](https://github.com/filecoin-project/bellperson/tree/v0.24.1) into this directory: `git clone https://github.com/filecoin-project/bellperson.git -b v0.24.1`
 2. Navigate into bellperson `cd bellperson`
 3. Apply `bellperson-0.24.1.patch` to bellperson: `git apply ../bellperson-0.24.1.patch`
-4. Navigate into `rust`
+4. Navigate back `cd ..`
 5. Run the test: `cargo test --release --test c2 -- --nocapture`
 6. The expected C2 runtime is approximately 2-3 minutes depending on GPU
