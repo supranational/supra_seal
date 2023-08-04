@@ -292,11 +292,11 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         if (caught_exception)
             return;
 
-        if (l_popcount >= (float)0.9 * points_l.size())
+        if (l_popcount >= (float)0.5 * points_l.size())
             l_skip_batch_add = true;
-        if (a_popcount >= (float)0.9 * points_a.size())
+        if (a_popcount >= (float)0.5 * points_a.size())
             a_skip_batch_add = true;
-        if (b_popcount >= (float)0.9 * points_b_g1.size())
+        if (b_popcount >= (float)0.5 * points_b_g1.size())
             b_skip_batch_add = true;
 
         if (l_skip_batch_add)
