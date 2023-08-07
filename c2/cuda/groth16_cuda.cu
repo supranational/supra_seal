@@ -8,7 +8,7 @@
 
 #define SPPARK_DONT_INSTANTIATE_TEMPLATES
 
-#define G2_MSM_ON_GPU 1
+//#define G2_MSM_ON_GPU
 
 #if defined(FEATURE_BLS12_381)
 # include <ff/bls12-381-fp2.hpp>
@@ -292,33 +292,24 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         if (caught_exception)
             return;
 
-        if (l_popcount >= (float)0.5 * points_l.size())
-            l_skip_batch_add = true;
-        if (a_popcount >= (float)0.5 * points_a.size())
-            a_skip_batch_add = true;
-        if (b_popcount >= (float)0.5 * points_b_g1.size())
-            b_skip_batch_add = true;
-
-        if (l_skip_batch_add)
-            split_vectors_l.tail_msms_resize(points_l.size());
-        else
+        if (!(l_skip_batch_add = (l_popcount >= points_l.size() / 2))) {
             split_vectors_l.tail_msms_resize(l_popcount);
-
-        if (a_skip_batch_add)
-            split_vectors_a.tail_msms_resize(points_a.size());
-        else
-            split_vectors_a.tail_msms_resize(a_popcount);
-
-        if (b_skip_batch_add)
-            split_vectors_b.tail_msms_resize(points_b_g1.size());
-        else
-            split_vectors_b.tail_msms_resize(b_popcount);
-
-        if (!l_skip_batch_add)
             tail_msm_l_bases.resize(l_popcount);
-        if (!a_skip_batch_add)
+        }
+
+        if (a_skip_batch_add = (a_popcount >= points_a.size() / 2)) {
+            split_vectors_a.tail_msms_resize(points_a.size());
+        }
+        else {
+            split_vectors_a.tail_msms_resize(a_popcount);
             tail_msm_a_bases.resize(a_popcount);
-        if (!b_skip_batch_add) {
+        }
+
+        if (b_skip_batch_add = (b_popcount >= points_b_g1.size() / 2)) {
+            split_vectors_b.tail_msms_resize(points_b_g1.size());
+        }
+        else {
+            split_vectors_b.tail_msms_resize(b_popcount);
             tail_msm_b_g1_bases.resize(b_popcount);
             tail_msm_b_g2_bases.resize(b_popcount);
         }
@@ -408,10 +399,6 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                             l_cursor++;
                         }
                     }
-                    else {
-                        tail_msm_l_scalars[l_cursor] = scalar;
-                        l_cursor++;
-                    }
 
                     if (!a_skip_batch_add) {
                         if (a_map & map_mask) {
@@ -492,22 +479,23 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
 
             if (!l_skip_batch_add)
                 assert(l_cursor == l_popcount);
-            else
-                assert(l_cursor == points_l.size());
 
             if (!a_skip_batch_add) {
                 assert(points_a_cursor == points_a.size());
                 assert(a_cursor == a_popcount);
             }
-            else
+            else {
                 assert(a_cursor == points_a.size());
+            }
 
             if (!b_skip_batch_add) {
                 assert(points_b_cursor == points_b_g1.size());
                 assert(b_cursor == b_popcount);
             }
-            else
+            else {
                 assert(b_cursor == points_b_g1.size());
+            }
+
         });
         // end of pre-processing step
 
@@ -517,23 +505,22 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         if (caught_exception)
             return;
 
-        // performing G2 MSM on the CPU results in a faster window_post
-        if (!G2_MSM_ON_GPU || b_skip_batch_add) {
+#ifndef G2_MSM_ON_GPU
             // tail MSM b_g2 - on CPU
             for (size_t c = 0; c < num_circuits; c++) {
-#ifndef __CUDA_ARCH__
+# ifndef __CUDA_ARCH__
                 mult_pippenger<bucket_fp2_t>(results.b_g2[c],
                     b_skip_batch_add ? points_b_g2.data() :
                                        tail_msm_b_g2_bases.data(),
                     split_vectors_b.tail_msm_scalars[c].size(),
                     split_vectors_b.tail_msm_scalars[c].data(),
                     true, &groth16_pool);
-#endif
+# endif
 
                 if (caught_exception)
                     return;
             }
-        }
+#endif
     });
 
     batch_add_results batch_add_res{num_circuits};
@@ -573,99 +560,108 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                 if (caught_exception)
                     return;
 
-                // batch addition L - on GPU
-                if (!l_skip_batch_add)
-                execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
-                                                 points_l.data(), points_l.size(),
-                                                 split_vectors_l,
-                                                 &batch_add_res.l[circuit0]);
-                if (caught_exception)
-                    return;
+                if (!l_skip_batch_add) {
+                    // batch addition L - on GPU
+                    execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
+                        points_l.data(), points_l.size(), split_vectors_l,
+                        &batch_add_res.l[circuit0]);
 
-                // batch addition a - on GPU
-                if (!a_skip_batch_add)
-                execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
-                                                 points_a.data(), points_a.size(),
-                                                 split_vectors_a,
-                                                 &batch_add_res.a[circuit0]);
-                if (caught_exception)
-                    return;
+                    if (caught_exception)
+                        return;
+                }
 
-                // batch addition b_g1 - on GPU
-                if (!b_skip_batch_add)
-                execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
-                                                 points_b_g1.data(), points_b_g1.size(),
-                                                 split_vectors_b,
-                                                 &batch_add_res.b_g1[circuit0]);
-                if (caught_exception)
-                    return;
+                if (!a_skip_batch_add) {
+                    // batch addition a - on GPU
+                    execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
+                        points_a.data(), points_a.size(), split_vectors_a,
+                        &batch_add_res.a[circuit0]);
 
-                // batch addition b_g2 - on GPU
-                if (!b_skip_batch_add)
-                execute_batch_addition<bucket_fp2_t>(gpu, circuit0, num_circuits,
-                                                     points_b_g2.data(), points_b_g2.size(),
-                                                     split_vectors_b,
-                                                     &batch_add_res.b_g2[circuit0]);
-                if (caught_exception)
-                    return;
+                    if (caught_exception)
+                        return;
+                }
+
+                if (!b_skip_batch_add) {
+                    // batch addition b_g1 - on GPU
+                    execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
+                        points_b_g1.data(), points_b_g1.size(), split_vectors_b,
+                        &batch_add_res.b_g1[circuit0]);
+
+                    if (caught_exception)
+                        return;
+
+                    // batch addition b_g2 - on GPU
+                    execute_batch_addition<bucket_fp2_t>(gpu, circuit0,
+                        num_circuits, points_b_g2.data(), points_b_g2.size(),
+                        split_vectors_b, &batch_add_res.b_g2[circuit0]);
+
+                    if (caught_exception)
+                        return;
+                }
 
                 {
                     msm_t<bucket_t, point_t, affine_t, scalar_t> msm{nullptr,
-                        std::max({split_vectors_l.tail_msm_scalars[0].size(),
-                                 split_vectors_a.tail_msm_scalars[0].size(),
-                                 split_vectors_b.tail_msm_scalars[0].size()})};
+                        std::max({l_skip_batch_add ? points_l.size() :
+                                  split_vectors_l.tail_msm_scalars[0].size(),
+                                  split_vectors_a.tail_msm_scalars[0].size(),
+                                  split_vectors_b.tail_msm_scalars[0].size()})};
 
                     for (size_t c = circuit0; c < circuit0+num_circuits; c++) {
                         // tail MSM l - on GPU
                         if (!l_skip_batch_add)
-                        msm.invoke(results.l[c], tail_msm_l_bases,
-                                   split_vectors_l.tail_msm_scalars[c], true);
+                            msm.invoke(results.l[c], tail_msm_l_bases,
+                                split_vectors_l.tail_msm_scalars[c], true);
                         else
-                        msm.invoke(results.l[c], points_l.data(), points_l.size(),
-                                   split_vectors_l.tail_msm_scalars[c].data(), true);
+                            msm.invoke(results.l[c], points_l.data(), points_l.size(),
+                                provers[c].aux_assignment_data, true);
 
                         if (caught_exception)
                             return;
 
                         // tail MSM a - on GPU
                         if (!a_skip_batch_add)
-                        msm.invoke(results.a[c], tail_msm_a_bases,
-                                   split_vectors_a.tail_msm_scalars[c], true);
+                            msm.invoke(results.a[c], tail_msm_a_bases,
+                                split_vectors_a.tail_msm_scalars[c], true);
                         else
-                        msm.invoke(results.a[c], points_a.data(), points_a.size(),
-                                   split_vectors_a.tail_msm_scalars[c].data(), true);
+                            msm.invoke(results.a[c], points_a.data(), points_a.size(),
+                                split_vectors_a.tail_msm_scalars[c].data(), true);
+
                         if (caught_exception)
                             return;
 
                         // tail MSM b_g1 - on GPU
                         if (!b_skip_batch_add)
-                        msm.invoke(results.b_g1[c], tail_msm_b_g1_bases,
-                                   split_vectors_b.tail_msm_scalars[c], true);
+                            msm.invoke(results.b_g1[c], tail_msm_b_g1_bases,
+                                split_vectors_b.tail_msm_scalars[c], true);
                         else
-                        msm.invoke(results.b_g1[c], points_b_g1.data(), points_b_g1.size(),
-                                   split_vectors_b.tail_msm_scalars[c].data(), true);
+                            msm.invoke(results.b_g1[c], points_b_g1.data(),
+                                points_b_g1.size(),
+                                split_vectors_b.tail_msm_scalars[c].data(), true);
+
                         if (caught_exception)
                             return;
                     }
                 }
 
-                if (G2_MSM_ON_GPU && !b_skip_batch_add)
+#ifdef G2_MSM_ON_GPU
                 {
                     msm_t<bucket_fp2_t, point_fp2_t, affine_fp2_t, scalar_t>
                         msm{nullptr, split_vectors_b.tail_msm_scalars[0].size()};
+
                     for (size_t c = circuit0; c < circuit0+num_circuits; c++) {
                         // tail MSM b_g2 - on GPU
                         if (!b_skip_batch_add)
-                        msm.invoke(results.b_g2[c], tail_msm_b_g2_bases,
-                            split_vectors_b.tail_msm_scalars[c], true);
+                            msm.invoke(results.b_g2[c], tail_msm_b_g2_bases,
+                                split_vectors_b.tail_msm_scalars[c], true);
                         else
-                        msm.invoke(results.b_g2[c], points_b_g2.data(), points_b_g2.size(),
-                            split_vectors_b.tail_msm_scalars[c].data(), true);
+                            msm.invoke(results.b_g2[c], points_b_g2.data(),
+                                points_b_g2.size(),
+                                split_vectors_b.tail_msm_scalars[c].data(), true);
 
                         if (caught_exception)
                             return;
                     }
                 }
+#endif
             } catch (const cuda_error& e) {
                 bool already = caught_exception.exchange(true);
                 if (!already) {
