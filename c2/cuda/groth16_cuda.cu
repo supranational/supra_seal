@@ -6,10 +6,6 @@
 #include <mutex>
 #include <algorithm>
 
-#define SPPARK_DONT_INSTANTIATE_TEMPLATES
-
-//#define G2_MSM_ON_GPU
-
 #if defined(FEATURE_BLS12_381)
 # include <ff/bls12-381-fp2.hpp>
 #else
@@ -29,12 +25,9 @@ typedef bucket_fp2_t::affine_t affine_fp2_t;
 
 typedef fr_t scalar_t;
 
+#define SPPARK_DONT_INSTANTIATE_TEMPLATES
 #include <msm/pippenger.cuh>
 #include <msm/pippenger.hpp>
-
-#ifdef __CUDA_ARCH__
-typedef uint8_t byte;
-#endif
 
 template<class Scalar>
 struct Assignment {
@@ -141,8 +134,8 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         assert(p.b_inp_bit_len == p.inp_assignment_size);
     }
 
-    bool l_skip_batch_add = false, a_skip_batch_add = false,
-         b_skip_batch_add = false;
+    bool l_split_msm = true, a_split_msm = true,
+         b_split_msm = true;
 
     split_vectors split_vectors_l{num_circuits, points_l.size()};
     split_vectors split_vectors_a{num_circuits, points_a.size()};
@@ -292,26 +285,24 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         if (caught_exception)
             return;
 
-        if (!(l_skip_batch_add = (l_popcount >= points_l.size() / 2))) {
+        if (l_split_msm = (l_popcount <= points_l.size() / 2)) {
             split_vectors_l.tail_msms_resize(l_popcount);
             tail_msm_l_bases.resize(l_popcount);
         }
 
-        if (a_skip_batch_add = (a_popcount >= points_a.size() / 2)) {
-            split_vectors_a.tail_msms_resize(points_a.size());
-        }
-        else {
+        if (a_split_msm = (a_popcount <= points_a.size() / 2)) {
             split_vectors_a.tail_msms_resize(a_popcount);
             tail_msm_a_bases.resize(a_popcount);
+        } else {
+            split_vectors_a.tail_msms_resize(points_a.size());
         }
 
-        if (b_skip_batch_add = (b_popcount >= points_b_g1.size() / 2)) {
-            split_vectors_b.tail_msms_resize(points_b_g1.size());
-        }
-        else {
+        if (b_split_msm = (b_popcount <= points_b_g1.size() / 2)) {
             split_vectors_b.tail_msms_resize(b_popcount);
             tail_msm_b_g1_bases.resize(b_popcount);
             tail_msm_b_g2_bases.resize(b_popcount);
+        } else {
+            split_vectors_b.tail_msms_resize(points_b_g1.size());
         }
 
         // populate bitmaps for batch additions, bases and scalars for tail msms
@@ -340,7 +331,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                     const fr_t& scalar = inp_assignment[i + j];
 
                     if (b_map & 1) {
-                        if (c == 0 && !b_skip_batch_add) {
+                        if (c == 0 && b_split_msm) {
                             tail_msm_b_g1_bases[b_cursor] = points_b_g1[b_cursor];
                             tail_msm_b_g2_bases[b_cursor] = points_b_g2[b_cursor];
                         }
@@ -353,7 +344,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                         }
                     }
 
-                    if (c == 0 && !a_skip_batch_add)
+                    if (c == 0 && a_split_msm)
                         tail_msm_a_bases[a_cursor] = points_a[a_cursor];
                     tail_msm_a_scalars[a_cursor] = scalar;
                     a_cursor++;
@@ -388,7 +379,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                     const fr_t& scalar = aux_assignment[i + j];
                     bool is_one = scalar.is_one();
 
-                    if (!l_skip_batch_add) {
+                    if (l_split_msm) {
                         if (is_one)
                             l_bits |= map_mask;
 
@@ -400,7 +391,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                         }
                     }
 
-                    if (!a_skip_batch_add) {
+                    if (a_split_msm) {
                         if (a_map & map_mask) {
                             uint64_t mask = (uint64_t)1 << a_bit_off;
 
@@ -423,15 +414,14 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                                 a_mask = tail_msm_a_mask[a_bits_cursor];
                             }
                         }
-                    }
-                    else {
+                    } else {
                         if (a_map & map_mask) {
                             tail_msm_a_scalars[a_cursor] = scalar;
                             a_cursor++;
                         }
                     }
 
-                    if (!b_skip_batch_add) {
+                    if (b_split_msm) {
                         if (b_map & map_mask) {
                             uint64_t mask = (uint64_t)1 << b_bit_off;
 
@@ -459,8 +449,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                                 b_mask = tail_msm_b_mask[b_bits_cursor];
                             }
                         }
-                    }
-                    else {
+                    } else {
                         if (b_map & map_mask) {
                             tail_msm_b_scalars[b_cursor] = scalar;
                             b_cursor++;
@@ -477,22 +466,20 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
             if (b_bit_off)
                 b_bit_vector[b_bits_cursor] = b_bits;
 
-            if (!l_skip_batch_add)
+            if (l_split_msm)
                 assert(l_cursor == l_popcount);
 
-            if (!a_skip_batch_add) {
+            if (a_split_msm) {
                 assert(points_a_cursor == points_a.size());
                 assert(a_cursor == a_popcount);
-            }
-            else {
+            } else {
                 assert(a_cursor == points_a.size());
             }
 
-            if (!b_skip_batch_add) {
+            if (b_split_msm) {
                 assert(points_b_cursor == points_b_g1.size());
                 assert(b_cursor == b_popcount);
-            }
-            else {
+            } else {
                 assert(b_cursor == points_b_g1.size());
             }
 
@@ -505,22 +492,20 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         if (caught_exception)
             return;
 
-#ifndef G2_MSM_ON_GPU
-            // tail MSM b_g2 - on CPU
-            for (size_t c = 0; c < num_circuits; c++) {
-# ifndef __CUDA_ARCH__
-                mult_pippenger<bucket_fp2_t>(results.b_g2[c],
-                    b_skip_batch_add ? points_b_g2.data() :
-                                       tail_msm_b_g2_bases.data(),
-                    split_vectors_b.tail_msm_scalars[c].size(),
-                    split_vectors_b.tail_msm_scalars[c].data(),
-                    true, &groth16_pool);
-# endif
-
-                if (caught_exception)
-                    return;
-            }
+        // tail MSM b_g2 - on CPU
+        for (size_t c = 0; c < num_circuits; c++) {
+#ifndef __CUDA_ARCH__
+            mult_pippenger<bucket_fp2_t>(results.b_g2[c],
+                b_split_msm ? tail_msm_b_g2_bases.data() :
+                              points_b_g2.data(),
+                split_vectors_b.tail_msm_scalars[c].size(),
+                split_vectors_b.tail_msm_scalars[c].data(),
+                true, &groth16_pool);
 #endif
+
+            if (caught_exception)
+                return;
+        }
     });
 
     batch_add_results batch_add_res{num_circuits};
@@ -560,7 +545,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                 if (caught_exception)
                     return;
 
-                if (!l_skip_batch_add) {
+                if (l_split_msm) {
                     // batch addition L - on GPU
                     execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
                         points_l.data(), points_l.size(), split_vectors_l,
@@ -570,7 +555,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                         return;
                 }
 
-                if (!a_skip_batch_add) {
+                if (a_split_msm) {
                     // batch addition a - on GPU
                     execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
                         points_a.data(), points_a.size(), split_vectors_a,
@@ -580,7 +565,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                         return;
                 }
 
-                if (!b_skip_batch_add) {
+                if (b_split_msm) {
                     // batch addition b_g1 - on GPU
                     execute_batch_addition<bucket_t>(gpu, circuit0, num_circuits,
                         points_b_g1.data(), points_b_g1.size(), split_vectors_b,
@@ -600,14 +585,14 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
 
                 {
                     msm_t<bucket_t, point_t, affine_t, scalar_t> msm{nullptr,
-                        std::max({l_skip_batch_add ? points_l.size() :
-                                  split_vectors_l.tail_msm_scalars[0].size(),
+                        std::max({l_split_msm ? split_vectors_l.tail_msm_scalars[0].size() :
+                                  points_l.size(),
                                   split_vectors_a.tail_msm_scalars[0].size(),
                                   split_vectors_b.tail_msm_scalars[0].size()})};
 
                     for (size_t c = circuit0; c < circuit0+num_circuits; c++) {
                         // tail MSM l - on GPU
-                        if (!l_skip_batch_add)
+                        if (l_split_msm)
                             msm.invoke(results.l[c], tail_msm_l_bases,
                                 split_vectors_l.tail_msm_scalars[c], true);
                         else
@@ -618,7 +603,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                             return;
 
                         // tail MSM a - on GPU
-                        if (!a_skip_batch_add)
+                        if (a_split_msm)
                             msm.invoke(results.a[c], tail_msm_a_bases,
                                 split_vectors_a.tail_msm_scalars[c], true);
                         else
@@ -629,7 +614,7 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                             return;
 
                         // tail MSM b_g1 - on GPU
-                        if (!b_skip_batch_add)
+                        if (b_split_msm)
                             msm.invoke(results.b_g1[c], tail_msm_b_g1_bases,
                                 split_vectors_b.tail_msm_scalars[c], true);
                         else
@@ -641,27 +626,6 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
                             return;
                     }
                 }
-
-#ifdef G2_MSM_ON_GPU
-                {
-                    msm_t<bucket_fp2_t, point_fp2_t, affine_fp2_t, scalar_t>
-                        msm{nullptr, split_vectors_b.tail_msm_scalars[0].size()};
-
-                    for (size_t c = circuit0; c < circuit0+num_circuits; c++) {
-                        // tail MSM b_g2 - on GPU
-                        if (!b_skip_batch_add)
-                            msm.invoke(results.b_g2[c], tail_msm_b_g2_bases,
-                                split_vectors_b.tail_msm_scalars[c], true);
-                        else
-                            msm.invoke(results.b_g2[c], points_b_g2.data(),
-                                points_b_g2.size(),
-                                split_vectors_b.tail_msm_scalars[c].data(), true);
-
-                        if (caught_exception)
-                            return;
-                    }
-                }
-#endif
             } catch (const cuda_error& e) {
                 bool already = caught_exception.exchange(true);
                 if (!already) {
@@ -686,11 +650,11 @@ RustError::by_value generate_groth16_proofs_c(const Assignment<fr_t> provers[],
         return ret;
 
     for (size_t circuit = 0; circuit < num_circuits; circuit++) {
-        if (!l_skip_batch_add)
+        if (l_split_msm)
             results.l[circuit].add(batch_add_res.l[circuit]);
-        if (!a_skip_batch_add)
+        if (a_split_msm)
             results.a[circuit].add(batch_add_res.a[circuit]);
-        if (!b_skip_batch_add) {
+        if (b_split_msm) {
             results.b_g1[circuit].add(batch_add_res.b_g1[circuit]);
             results.b_g2[circuit].add(batch_add_res.b_g2[circuit]);
         }

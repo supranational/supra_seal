@@ -93,8 +93,8 @@ void execute_batch_addition(const gpu_t& gpu,
     size_t d_points_size = batch_size * 2 * sizeof(affine_h);
     size_t d_buckets_size = num_circuits * nbuckets * sizeof(bucket_h);
 
-    dev_ptr_t<byte> d_temp{d_points_size + d_buckets_size +
-                           num_circuits * bit_vector_size * sizeof(mask_t)};
+    dev_ptr_t<uint8_t> d_temp{d_points_size + d_buckets_size +
+                              num_circuits * bit_vector_size * sizeof(mask_t)};
 
     vec2d_t<affine_h> d_points{&d_temp[0], (uint32_t)batch_size};
     vec2d_t<bucket_h> d_buckets{&d_temp[d_points_size], nbuckets};

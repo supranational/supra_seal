@@ -29,6 +29,10 @@ public:
     T& operator[](size_t i) const       { return ptr[i]; }
 };
 
+#ifdef __CUDA_ARCH__
+typedef uint8_t byte;
+#endif
+
 extern "C" {
     int blst_p1_deserialize(affine_t*, const byte[96]);
     int blst_p2_deserialize(affine_fp2_t*, const byte[192]);
