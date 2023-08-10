@@ -74,10 +74,11 @@ public:
     // a is the result vector
     static void execute_ntt_msm_h(const gpu_t& gpu, gpu_ptr_t<fr_t> d_a,
                                   const Assignment<fr_t>& input,
-                                  const affine_t points_h[], size_t npoints,
+                                  slice_t<affine_t> points_h,
                                   point_t& result_h)
     {
         size_t actual_size = input.abc_size;
+        size_t npoints = points_h.size();
         size_t lg_domain_size = lg2(npoints - 1) + 1;
         size_t domain_size = (size_t)1 << lg_domain_size;
 
@@ -119,7 +120,7 @@ public:
         gpu[1 + lot_of_memory].sync();
 
         msm_t<bucket_t, point_t, affine_t, fr_t> msm(nullptr, npoints);
-        msm.invoke(result_h, points_h, npoints, d_a, true);
+        msm.invoke(result_h, points_h, d_a, true);
     }
 };
 
