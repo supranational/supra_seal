@@ -6,7 +6,6 @@
 #include <unistd.h>
 
 #include <list>
-#include <util/thread_pool_t.hpp>
 
 struct verifying_key {
     affine_t alpha_g1;
@@ -15,18 +14,6 @@ struct verifying_key {
     affine_fp2_t gamma_g2;
     affine_t delta_g1;
     affine_fp2_t delta_g2;
-};
-
-template<typename T> class slice_t {
-    T* ptr;
-    size_t nelems;
-public:
-    slice_t(void *p, size_t n) : ptr(reinterpret_cast<T*>(p)), nelems(n) {}
-    slice_t(const T* p, size_t n) : ptr(const_cast<T*>(p)), nelems(n) {}
-    slice_t() : ptr(nullptr), nelems(0) {}
-    T* data() const                     { return ptr; }
-    size_t size() const                 { return nelems; }
-    T& operator[](size_t i) const       { return ptr[i]; }
 };
 
 #ifdef __CUDA_ARCH__
@@ -106,7 +93,7 @@ private:
             return res;
         }
 
-        static size_t get_batch_size(uint32_t num_points, size_t num_threads) {
+        static size_t get_batch_size(size_t num_points, size_t num_threads) {
             size_t batch_size = (num_points + num_threads - 1) / num_threads;
             batch_size = (batch_size + 64 - 1) / 64;
             return batch_size;
@@ -124,29 +111,29 @@ private:
             return p2_affine_size;
         }
 
-        static void read_g1_points(affine_t* points, const byte* srs_ptr,
-                                   uint32_t num_points)
+        static void read_g1_points(slice_t<affine_t> points, const byte* srs_ptr)
         {
+            size_t num_points = points.size();
             size_t batch_size = get_batch_size(num_points, get_num_threads());
 
             const byte (*srs)[p1_affine_size] =
                 reinterpret_cast<decltype(srs)>(srs_ptr);
 
             groth16_pool.par_map(num_points, batch_size, [&](size_t i) {
-                (void)read_g1_point(&points[i], srs[i]);
+                (void)read_g1_point(const_cast<affine_t*>(&points[i]), srs[i]);
             }, get_num_threads());
         }
 
-        static void read_g2_points(affine_fp2_t* points, const byte* srs_ptr,
-                                   uint32_t num_points)
+        static void read_g2_points(slice_t<affine_fp2_t> points, const byte* srs_ptr)
         {
+            size_t num_points = points.size();
             size_t batch_size = get_batch_size(num_points, get_num_threads());
 
             const byte (*srs)[p2_affine_size] =
                 reinterpret_cast<decltype(srs)>(srs_ptr);
 
             groth16_pool.par_map(num_points, batch_size, [&](size_t i) {
-                (void)read_g2_point(&points[i], srs[i]);
+                (void)read_g2_point(const_cast<affine_fp2_t*>(&points[i]), srs[i]);
             }, get_num_threads());
         }
 
@@ -299,11 +286,11 @@ private:
                 std::lock_guard<std::mutex> guard(mtx);
                 barrier.notify();
 
-                read_g1_points(&h[0], srs_ptr + data.h.off, data.h.size);
-                read_g1_points(&l[0], srs_ptr + data.l.off, data.l.size);
-                read_g1_points(&a[0], srs_ptr + data.a.off, data.a.size);
-                read_g1_points(&b_g1[0], srs_ptr + data.b_g1.off, data.b_g1.size);
-                read_g2_points(&b_g2[0], srs_ptr + data.b_g2.off, data.b_g2.size);
+                read_g1_points(h, srs_ptr + data.h.off);
+                read_g1_points(l, srs_ptr + data.l.off);
+                read_g1_points(a, srs_ptr + data.a.off);
+                read_g1_points(b_g1, srs_ptr + data.b_g1.off);
+                read_g2_points(b_g2, srs_ptr + data.b_g2.off);
 
                 munmap(const_cast<byte*>(srs_ptr), file_size);
             });
