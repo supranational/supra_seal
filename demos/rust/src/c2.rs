@@ -23,7 +23,7 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
     num_sectors: usize,
     c1_dir: &str,
     start_sector_id: usize,
-    porep_config: PoRepConfig,
+    porep_config: Arc<PoRepConfig>,
 ) -> usize {
     // Choose some fixed values for demonstration
     // All sectors using the same prover id, ticket, and wait seed
@@ -40,6 +40,7 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
         let slots_sector_id = Arc::clone(&slots_sector_id);
         let successes = Arc::clone(&successes);
         let commit_phase1_output_base_path = commit_phase1_output_path.clone();
+        let porep_config = Arc::clone(&porep_config);
             
         let prover = thread::spawn(move || {
             loop {
@@ -88,7 +89,7 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
                 println!("Starting seal_commit_phase2 sector {}", sector_slot);
                 let now = Instant::now();
                 let commit_output = seal_commit_phase2(
-                    porep_config,
+                    &porep_config,
                     commit_phase1_output,
                     prover_id,
                     sector_id
@@ -97,7 +98,7 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
                 println!("seal_commit_phase2 took: {:.2?}", now.elapsed());
                 
                 let result = verify_seal::<Tree>(
-                    porep_config,
+                    &porep_config,
                     comm_r,
                     comm_d,
                     prover_id,
@@ -128,10 +129,10 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
 #[cfg(feature = "32GiB")]
 fn run_c2_32(num_sectors: usize, c1_dir: &str, start_sector_id: usize) -> usize {
     let arbitrary_porep_id = [99; 32];
-    let porep_config = PoRepConfig::new_groth16(
+    let porep_config = Arc::new(PoRepConfig::new_groth16(
         filecoin_proofs_v1::constants::SECTOR_SIZE_32_GIB,
         arbitrary_porep_id,
-        ApiVersion::V1_1_0);
+        ApiVersion::V1_1_0));
 
     run_c2::<filecoin_proofs_v1::SectorShape32GiB>(
         num_sectors,
@@ -144,10 +145,10 @@ fn run_c2_32(num_sectors: usize, c1_dir: &str, start_sector_id: usize) -> usize 
 #[cfg(feature = "512MiB")]
 fn run_c2_512(num_sectors: usize, c1_dir: &str, start_sector_id: usize) -> usize {
     let arbitrary_porep_id = [99; 32];
-    let porep_config = PoRepConfig::new_groth16(
+    let porep_config = Arc::new(PoRepConfig::new_groth16(
         filecoin_proofs_v1::constants::SECTOR_SIZE_512_MIB,
         arbitrary_porep_id,
-        ApiVersion::V1_1_0);
+        ApiVersion::V1_1_0));
 
     run_c2::<filecoin_proofs_v1::SectorShape512MiB>(
         num_sectors,

@@ -1,28 +1,19 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index b5fd13d..84bd015 100644
+index fd62db4..a06edb1 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -36,6 +36,7 @@ blstrs = { version = "0.6.0", features = ["__private_bench"] }
- pairing = "0.22"
+@@ -36,6 +36,7 @@ pairing = "0.23"
+ blstrs = { version = "0.7.0", features = ["__private_bench"] }
  ec-gpu = { version = "0.2.0" }
- ec-gpu-gen = { version = "0.5.0" }
+ ec-gpu-gen = { version = "0.6.0" }
 +supraseal-c2 = { path = ".." }
  
- fs2 = { version = "0.4.3", optional = true }
  
+ fs2 = { version = "0.4.3", optional = true }
 diff --git a/src/groth16/mapped_params.rs b/src/groth16/mapped_params.rs
-index ea3d051..8942e75 100644
+index ea3d051..ce940e1 100644
 --- a/src/groth16/mapped_params.rs
 +++ b/src/groth16/mapped_params.rs
-@@ -19,7 +19,7 @@ pub struct MappedParameters<E>
- where
-     E: MultiMillerLoop,
- {
--    /// The parameter file we're reading from.  
-+    /// The parameter file we're reading from.
-     pub param_file_path: PathBuf,
-     /// The file descriptor we have mmaped.
-     pub param_file: File,
 @@ -60,6 +60,10 @@ where
      type G1Builder = (Arc<Vec<E::G1Affine>>, usize);
      type G2Builder = (Arc<Vec<E::G2Affine>>, usize);
@@ -70,7 +61,7 @@ index 0afb4f2..b076c89 100644
  pub struct Proof<E: Engine> {
      pub a: E::G1Affine,
 diff --git a/src/groth16/prover.rs b/src/groth16/prover.rs
-index 49c3c20..afab181 100644
+index 86389ee..6dd7c5e 100644
 --- a/src/groth16/prover.rs
 +++ b/src/groth16/prover.rs
 @@ -256,7 +256,11 @@ where
@@ -98,7 +89,7 @@ index 49c3c20..afab181 100644
 +    }
  }
  
- #[allow(clippy::type_complexity)]
+ #[allow(clippy::drop_non_drop)]
 @@ -786,3 +794,154 @@ mod tests {
          }
      }
@@ -202,8 +193,8 @@ index 49c3c20..afab181 100644
 +        provers.iter().map(|p| p.into()).collect();
 +
 +    let (r_s, s_s) = randomization.unwrap_or((
-+        vec![E::Fr::zero(); num_circuits],
-+        vec![E::Fr::zero(); num_circuits],
++        vec![E::Fr::ZERO; num_circuits],
++        vec![E::Fr::ZERO; num_circuits],
 +    ));
 +
 +    let mut proofs: Vec<Proof<E>> = Vec::with_capacity(num_circuits);
@@ -238,7 +229,7 @@ index 49c3c20..afab181 100644
 +        .map(|circuit| -> Result<_, SynthesisError> {
 +            let mut prover = ProvingAssignment::new();
 +
-+            prover.alloc_input(|| "", || Ok(Scalar::one()))?;
++            prover.alloc_input(|| "", || Ok(Scalar::ONE))?;
 +
 +            circuit.synthesize(&mut prover)?;
 +
