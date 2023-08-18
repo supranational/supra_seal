@@ -133,9 +133,9 @@ if [ ! -d "deps/blst" ]; then
      ./build.sh -D__ADX__)
 fi
 if [ ! -d "c2/bellperson" ]; then
-    git clone https://github.com/filecoin-project/bellperson.git -b v0.24.1 c2/bellperson
+    git clone https://github.com/filecoin-project/bellperson.git -b v0.25.0 c2/bellperson
     (cd c2/bellperson
-     git apply ../bellperson-0.24.1.patch)
+     git apply ../bellperson-0.25.0.patch)
 fi
 
 $CC -c sha/sha_ext_mbx2.S -o obj/sha_ext_mbx2.o

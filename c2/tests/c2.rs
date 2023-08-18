@@ -45,7 +45,7 @@ fn run_seal() {
 
     let porep_config =
         PoRepConfig::new_groth16(SECTOR_SIZE_32_GIB, arbitrary_porep_id, ApiVersion::V1_1_0);
-    let groth_params = get_stacked_params::<SectorShape32GiB>(porep_config).unwrap();
+    let groth_params = get_stacked_params::<SectorShape32GiB>(&porep_config).unwrap();
     let param_file_path = groth_params.param_file_path.clone();
 
     println!("Reading SRS file {:?}", param_file_path);
@@ -69,12 +69,12 @@ fn run_seal() {
     println!("Starting seal_commit_phase2");
     let now = Instant::now();
     let commit_output =
-        seal_commit_phase2(porep_config, commit_phase1_output, prover_id, sector_id).unwrap();
+        seal_commit_phase2(&porep_config, commit_phase1_output, prover_id, sector_id).unwrap();
     println!("seal_commit_phase2 took: {:.2?}", now.elapsed());
 
     println!("Verifying result");
     let result = verify_seal::<SectorShape32GiB>(
-        porep_config,
+        &porep_config,
         comm_r,
         comm_d,
         prover_id,
