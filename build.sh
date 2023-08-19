@@ -21,14 +21,14 @@ CXXSTD=`$CXX -dM -E -x c++ /dev/null | \
         awk '{ if($2=="__cplusplus" && $3<"2017") print "-std=c++17"; }'`
 
 INCLUDE="-I$SPDK/include -I$SPDK/isa-l/.. -I$SPDK/dpdk/build/include"
-CFLAGS="$SECTOR_SIZE -g -O2 $INCLUDE -D__ADX__"
-CXXFLAGS="$CFLAGS $CXXSTD \
-          -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter \
-          -Wno-missing-field-initializers -fno-strict-aliasing \
-          -march=native -Wformat -Wformat-security \
-          -D_GNU_SOURCE -fPIC -fstack-protector \
-          -fno-common -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 \
-          -DSPDK_GIT_COMMIT=4be6d3043 -pthread"
+CFLAGS="$SECTOR_SIZE $INCLUDE -g -O2"
+CXXFLAGS="$CFLAGS -march=native $CXXSTD \
+          -fPIC -fno-omit-frame-pointer -fno-strict-aliasing \
+          -fstack-protector -fno-common \
+          -D_GNU_SOURCE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 \
+          -DSPDK_GIT_COMMIT=4be6d3043 -pthread \
+          -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
+          -Wformat -Wformat-security"
 
 LDFLAGS="-fno-omit-frame-pointer -Wl,-z,relro,-z,now -Wl,-z,noexecstack -fuse-ld=bfd\
          -L$SPDK/build/lib \
@@ -130,7 +130,7 @@ fi
 if [ ! -d "deps/blst" ]; then
     git clone https://github.com/supranational/blst.git deps/blst
     (cd deps/blst
-     ./build.sh -D__ADX__)
+     ./build.sh -march=native)
 fi
 if [ ! -d "c2/bellperson" ]; then
     git clone https://github.com/filecoin-project/bellperson.git -b v0.25.0 c2/bellperson
@@ -155,9 +155,11 @@ $CXX $CXXFLAGS -Ideps/sppark/util -o obj/pc1.o -c pc1/pc1.cpp &
 # PC2
 $CXX $CXXFLAGS -o obj/streaming_node_reader_nvme.o -c nvme/streaming_node_reader_nvme.cpp &
 $CXX $CXXFLAGS -o obj/ring_t.o -c nvme/ring_t.cpp &
-$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
+$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -march=native \
+      -Xcompiler -Wall,-Wextra,-Wno-subobject-linkage \
       -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dc pc2/cuda/pc2.cu -o obj/pc2.o &
-$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -Wno-subobject-linkage \
+$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -march=native \
+      -Xcompiler -Wall,-Wextra,-Wno-subobject-linkage \
       -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dlink pc2/cuda/pc2.cu -o obj/pc2_link.o &
 
 $CXX -g -O2 -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
@@ -191,24 +193,24 @@ $CXX $CXXSTD -pthread -g -O3 -march=native \
 # tree-r CPU + GPU
 $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
      $CUDA_ARCH -std=c++17 -g -O3 -Xcompiler -march=native \
-     -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
-     -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
+     -Xcompiler -Wall,-Wextra,-Werror \
+     -Xcompiler -Wno-subobject-linkage,-Wno-unused-parameter \
      -x cu tools/tree_r.cpp -o bin/tree_r \
      -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
 
 # Standalone GPU pc2
 $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
-     -g -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
-     -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
-     -Xcompiler -march=native -O3 \
+     $CUDA_ARCH -std=c++17 -g -O3 -Xcompiler -march=native \
+     -Xcompiler -Wall,-Wextra,-Werror \
+     -Xcompiler -Wno-subobject-linkage,-Wno-unused-parameter \
      -x cu tools/tree_r.cpp -o bin/tree_r \
      -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
 
 # Standalone GPU pc2
 $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
-     -g -Xcompiler -Wall -Xcompiler -Wextra -Xcompiler -Werror \
-     -Xcompiler -Wno-subobject-linkage -Xcompiler -Wno-unused-parameter \
-     -Xcompiler -march=native -O3 \
+     $CUDA_ARCH -std=c++17 -g -O3 -Xcompiler -march=native \
+     -Xcompiler -Wall,-Wextra,-Werror \
+     -Xcompiler -Wno-subobject-linkage,-Wno-unused-parameter \
      -x cu tools/pc2.cu -o bin/pc2 \
      -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
 
