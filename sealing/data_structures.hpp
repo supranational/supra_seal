@@ -99,7 +99,7 @@ public:
   static const size_t NODE_BITS = SECTOR_SIZE_LG - NODE_SIZE_LG;
   static const size_t NODE_MASK = (1 << NODE_BITS) - 1;
 
-  node_id_t() {
+  node_id_t() noexcept {
     _id = 0;
   }
   node_id_t(uint64_t node) {
