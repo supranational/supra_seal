@@ -15,16 +15,16 @@ const char* get_parent_filename() {
   switch (SECTOR_SIZE_LG) {
   case SectorSizeLg::Sector2KB:
     // 2KB
-    return "/var/tmp/filecoin-parents/v28-sdr-parent-652bae61e906c0732e9eb95b1217cfa6afcce221ff92a8aedf62fa778fa765bc.cache";
+    return "/var/tmp/filecoin-parents/v28-sdr-parent-494d91dc80f2df5272c4b9e129bc7ade9405225993af9fe34e6542a39a47554b.cache";
   case SectorSizeLg::Sector16MB:
     // 16MB
     return "/var/tmp/filecoin-parents/v28-sdr-parent-7fa3ff8ffb57106211c4be413eb15ea072ebb363fa5a1316fe341ac8d7a03d51.cache";
   case SectorSizeLg::Sector512MB:
     // 512MB
-    return "/var/tmp/filecoin-parents/v28-sdr-parent-016f31daba5a32c5933a4de666db8672051902808b79d51e9b97da39ac9981d3.cache";
+    return "/var/tmp/filecoin-parents/v28-sdr-parent-7ba215a1d2345774ab90b8cb1158d296e409d6068819d7b8c7baf0b25d63dc34.cache";
   case SectorSizeLg::Sector32GB:
     // 32GB
-    return "/var/tmp/filecoin-parents/v28-sdr-parent-55c7d1e6bb501cc8be94438f89b577fddda4fafa71ee9ca72eabe2f0265aefa6.cache";
+    return "/var/tmp/filecoin-parents/v28-sdr-parent-21981246c370f9d76c7a77ab273d94bde0ceb4e938292334960bce05585dc117.cache";
   default:
     printf("ERROR: unknown sector size lg %ld\n", SECTOR_SIZE_LG);
     return nullptr;
