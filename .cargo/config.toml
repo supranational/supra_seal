@@ -1,3 +1,2 @@
 [patch.crates-io]
-sppark = { git = "https://github.com/supranational/sppark" }
 bellperson = { path = "c2/bellperson", version = "0.25.0"}
