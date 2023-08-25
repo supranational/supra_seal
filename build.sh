@@ -132,9 +132,9 @@ if [ ! -d "deps/blst" ]; then
     (cd deps/blst
      ./build.sh -march=native)
 fi
-if [ ! -d "c2/bellperson" ]; then
-    git clone https://github.com/filecoin-project/bellperson.git -b v0.25.0 c2/bellperson
-    (cd c2/bellperson
+if [ ! -d "demos/bellperson" ]; then
+    git clone https://github.com/filecoin-project/bellperson.git -b v0.25.0 demos/bellperson
+    (cd demos/bellperson
      git apply ../bellperson-0.25.0.patch)
 fi
 

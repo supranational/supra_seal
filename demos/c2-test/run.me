@@ -1,0 +1,18 @@
+#!/bin/sh
+
+cd `dirname $0`
+
+(
+  cd ..
+  if [ ! -d bellperson ]; then
+    git clone https://github.com/filecoin-project/bellperson.git -b v0.25.0
+    cd bellperson
+    git apply ../bellperson-0.25.0.patch
+  elif [ bellperson-0.25.0.patch -nt bellperson/Cargo.toml ]; then
+    cd bellperson
+    git checkout .
+    git apply ../bellperson-0.25.0.patch
+  fi
+)
+
+cargo test --release "$@"

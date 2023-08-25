@@ -1,2 +1,0 @@
-[patch.crates-io]
-bellperson = { path = "c2/bellperson", version = "0.25.0"}
