@@ -5,15 +5,13 @@ fn main() {
 }
 
 fn groth16_cuda() {
-    let curve_feature = "FEATURE_BLS12_381";
-
     let mut nvcc = cc::Build::new();
     nvcc.cuda(true);
     nvcc.flag("-arch=sm_80");
     nvcc.flag("-gencode").flag("arch=compute_70,code=sm_70");
     nvcc.flag("-t0");
     nvcc.define("TAKE_RESPONSIBILITY_FOR_ERROR_MESSAGE", None);
-    nvcc.define(curve_feature, None);
+    nvcc.define("FEATURE_BLS12_381", None);
     apply_blst_flags(&mut nvcc);
     if let Some(include) = env::var_os("DEP_BLST_C_SRC") {
         nvcc.include(&include);
@@ -50,14 +48,5 @@ fn apply_blst_flags(nvcc: &mut cc::Build) {
             }
         }
         (true, true) => panic!("Cannot compile with both `portable` and `force-adx` features"),
-    }
-
-    nvcc.flag("-Xcompiler").flag("-mno-avx"); // avoid costly transitions
-    nvcc.flag("-Xcompiler").flag("-fno-builtin");
-    nvcc.flag("-Xcompiler")
-        .flag("-Wno-unused-command-line-argument");
-
-    if !cfg!(debug_assertions) {
-        nvcc.flag("-Xcompiler").flag("-O2");
     }
 }
