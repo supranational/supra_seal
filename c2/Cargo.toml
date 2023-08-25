@@ -2,17 +2,13 @@
 name = "supraseal-c2"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+description = "CUDA Groth16 proof generator for Filecoin"
+repository = "https://github.com/supranational/supra_seal"
 
 [dependencies]
 blst = "^0.3.11"
 sppark = "^0.1.5"
-
-[dev-dependencies]
-anyhow = "1.0.26"
-bincode = "1.1.2"
-filecoin-proofs-api = "15.0.0"
-filecoin-proofs-v1 = { package = "filecoin-proofs", version = "15.0.0", default-features = false }
-storage-proofs-core = { version = "15.0.0", default-features = false }
 
 [features]
 default = []
@@ -26,4 +22,3 @@ quiet = []
 
 [build-dependencies]
 cc = { version = "^1.0.70", features = ["parallel"] }
-which = "^4.0"
