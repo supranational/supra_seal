@@ -1,12 +1,12 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index fd62db4..a06edb1 100644
+index fd62db4..dd35201 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -36,6 +36,7 @@ pairing = "0.23"
  blstrs = { version = "0.7.0", features = ["__private_bench"] }
  ec-gpu = { version = "0.2.0" }
  ec-gpu-gen = { version = "0.6.0" }
-+supraseal-c2 = { path = ".." }
++supraseal-c2 = "0"
  
  
  fs2 = { version = "0.4.3", optional = true }
