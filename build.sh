@@ -156,11 +156,8 @@ $CXX $CXXFLAGS -Ideps/sppark/util -o obj/pc1.o -c pc1/pc1.cpp &
 $CXX $CXXFLAGS -o obj/streaming_node_reader_nvme.o -c nvme/streaming_node_reader_nvme.cpp &
 $CXX $CXXFLAGS -o obj/ring_t.o -c nvme/ring_t.cpp &
 $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -march=native \
-      -Xcompiler -Wall,-Wextra,-Wno-subobject-linkage \
-      -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dc pc2/cuda/pc2.cu -o obj/pc2.o &
-$NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -march=native \
-      -Xcompiler -Wall,-Wextra,-Wno-subobject-linkage \
-      -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -dlink pc2/cuda/pc2.cu -o obj/pc2_link.o &
+      -Xcompiler -Wall,-Wextra,-Wno-subobject-linkage,-Wno-unused-parameter \
+      -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -c pc2/cuda/pc2.cu -o obj/pc2.o &
 
 $CXX -g -O2 -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
 
@@ -172,7 +169,6 @@ wait
 ar rvs obj/libsupraseal.a \
    obj/pc1.o \
    obj/pc2.o \
-   obj/pc2_link.o \
    obj/ring_t.o \
    obj/streaming_node_reader_nvme.o \
    obj/supra_seal.o \
