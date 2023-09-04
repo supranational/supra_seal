@@ -2,6 +2,7 @@
 name = "supraseal-c2-test"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,7 +12,5 @@ edition = "2021"
 supraseal-c2 = "0"
 anyhow = "1.0.26"
 bincode = "1.1.2"
-filecoin-proofs-api = "15.0.0"
-filecoin-proofs-v1 = { package = "filecoin-proofs", version = "15.0.0", default-features = false }
-storage-proofs-core = { version = "15.0.0", default-features = false }
-
+filecoin-proofs = { version = "16.0.0", default-features = false, features = ["cuda-supraseal"] }
+storage-proofs-core = { version = "16.0.0", default-features = false, features = ["cuda-supraseal"] }
