@@ -8,12 +8,11 @@ use std::fs::read;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use filecoin_proofs_api::SectorId;
-use filecoin_proofs_v1::{
-    caches::get_stacked_params, constants::SECTOR_SIZE_32_GIB, seal_commit_phase2, verify_seal,
+use filecoin_proofs::{
+    constants::SECTOR_SIZE_32_GIB, seal_commit_phase2, verify_seal,
     PoRepConfig, SealCommitPhase1Output, SectorShape32GiB,
 };
-use storage_proofs_core::api_version::ApiVersion;
+use storage_proofs_core::{api_version::ApiVersion, sector::SectorId};
 
 #[test]
 fn run_seal() {
@@ -39,23 +38,12 @@ fn run_seal() {
         res
     };
 
-    let sector_id = SectorId::from(0xFACE);
+    let sector_id = SectorId::from(0);
     let prover_id: [u8; 32] = [9u8; 32];
     let arbitrary_porep_id = [99; 32];
 
     let porep_config =
         PoRepConfig::new_groth16(SECTOR_SIZE_32_GIB, arbitrary_porep_id, ApiVersion::V1_1_0);
-    let groth_params = get_stacked_params::<SectorShape32GiB>(&porep_config).unwrap();
-    let param_file_path = groth_params.param_file_path.clone();
-
-    println!("Reading SRS file {:?}", param_file_path);
-    let _srs = match supraseal_c2::SRS::try_new(param_file_path, true) {
-        Ok(srs) => srs,
-        Err(err) => panic!(
-            "Failed to read SRS file with message: {}",
-            String::from(err)
-        ),
-    };
 
     let SealCommitPhase1Output {
         vanilla_proofs: _,
