@@ -5,19 +5,19 @@
 
 // Class to iterate through a cached parent graph.
 
+template<class P>
 struct parent_iter_t {
-  node_id_t _node;
-  uint32_t  _parent;
-  uint32_t* parent_buf;
-  uint32_t* parent_ptr;
+  node_id_t<P> _node;
+  uint32_t     _parent;
+  uint32_t*    parent_buf;
+  uint32_t*    parent_ptr;
 
-  parent_iter_t(node_id_t start) :
-    _node(start), _parent(0) {
-  }
+  parent_iter_t(node_id_t<P> start) :
+    _node(start), _parent(0) {}
 
   // Size in bytes of the parent graph
-  static size_t bytes() {
-    return NODE_COUNT * PARENT_COUNT * PARENT_SIZE;
+  static size_t bytes(size_t node_count) {
+    return node_count * PARENT_COUNT * PARENT_SIZE;
   }
 
   void set_buf(uint32_t* buf) {
@@ -39,10 +39,10 @@ struct parent_iter_t {
       parent_ptr = parent_buf;
     }
   }
-  node_id_t operator *() {
+  node_id_t<P> operator *() {
     uint32_t layer = (_node.layer() == 0 ? 0 :
                       (is_prev_layer() ? _node.layer() - 1 : _node.layer()));
-    node_id_t parent_id(layer, *parent_ptr);
+    node_id_t<P> parent_id(layer, *parent_ptr);
     return parent_id;
   }
   uint64_t id() {
@@ -56,9 +56,9 @@ struct parent_iter_t {
   }
   uint32_t parent() {
     return _parent;
-  }  
+  }
 
-  node_id_t get_node() {
+  node_id_t<P> get_node() {
     return _node;
   }
   size_t get_parent() {

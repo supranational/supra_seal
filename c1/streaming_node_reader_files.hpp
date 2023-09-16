@@ -15,27 +15,25 @@
 template<class C>
 class streaming_node_reader_t {
   std::vector<mmap_t<node_t>> layer_files;
-  SectorParameters& params;
   // Packed indicates nodes within a single layer will be contiguous
   bool packed;
   size_t num_slots;
-  size_t pages_per_slot; 
+  size_t pages_per_slot;
 
   node_t* buffer;
 
   thread_pool_t pool;
-  
+
 public:
-  streaming_node_reader_t(SectorParameters& _params,
-                          std::vector<std::string> layer_filenames, size_t sector_size)
-    : params(_params), buffer(nullptr)
+  streaming_node_reader_t(size_t sector_size, std::vector<std::string> layer_filenames)
+    : buffer(nullptr)
   {
     layer_files.resize(layer_filenames.size());
     for (size_t i = 0; i < layer_filenames.size(); i++) {
       layer_files[i].mmap_read(layer_filenames[i], sector_size);
     }
   }
-  
+
   ~streaming_node_reader_t() {
     free_slots();
   }
@@ -43,12 +41,12 @@ public:
   bool data_is_big_endian() {
     return true;
   }
-  
+
   // Allocate resource to perform N reads, each of size slot_node_count. These
   // will be indexed by slot_id
   // For C1 (load_nodes, get_node), we don't need local storage because it can
   // just use the mmapped files.
-  // For PC2 create buffers to consolidate the data. 
+  // For PC2 create buffers to consolidate the data.
   void alloc_slots(size_t _num_slots, size_t slot_node_count, bool _packed) {
     packed = _packed;
     if (!packed) {
@@ -74,24 +72,23 @@ public:
     free(buffer);
     buffer = nullptr;
   }
-  
+
   ////////////////////////////////////////
   // Used for PC2
   ////////////////////////////////////////
-
   node_t* load_layers(size_t slot, uint32_t layer, uint64_t node,
-                       size_t node_count, size_t num_layers,
-                       std::atomic<uint64_t>* valid, size_t* valid_count) {
+                      size_t node_count, size_t num_layers,
+                      std::atomic<uint64_t>* valid, size_t* valid_count) {
     if (num_layers == 1) {
       // Simply return a pointer to the mmap'd file data
       // This is used by pc2 when bulding just tree-r
-      assert (layer == params.GetNumLayers() - 1);
+      assert (layer == C::GetNumLayers() - 1);
       assert (C::PARALLEL_SECTORS == 1);
       assert (layer_files.size() == 1);
-      
+
       *valid = 1;
       *valid_count = 1;
-      
+
       return &layer_files[0][node];
     } else {
       // Consolidate the layer data into the buffer
@@ -105,10 +102,10 @@ public:
       pool.par_map(num_layers, 1, [&](size_t i) {
         layer_files[i].read_data(node, &dest[i * node_count], node_count);
       });
-      
+
       *valid = 1;
       *valid_count = 1;
-      
+
       return dest;
     }
   }
@@ -116,7 +113,7 @@ public:
   ////////////////////////////////////////
   // Used for C1
   ////////////////////////////////////////
-  
+
   // Load a vector of node IDs into the local buffer
   // The nodes are a vector of layer, node_id pairs
   // Since the nodes may be non-consecutive each node will use
@@ -141,4 +138,3 @@ public:
 };
 
 #endif
-

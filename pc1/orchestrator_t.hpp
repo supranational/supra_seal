@@ -10,10 +10,10 @@ class orchestrator_t {
   typedef typename system_buffers_t<C>::node_buffer_iterator_t node_buffer_iterator_t;
   typedef typename system_buffers_t<C>::page_batch_ptr_t       page_batch_ptr_t;
   typedef typename system_buffers_t<C>::node_batch_ptr_t       node_batch_ptr_t;
-  
+
   // Nodes to process
-  node_id_t node_start;
-  node_id_t node_stop;
+  node_id_t<C> node_start;
+  node_id_t<C> node_stop;
 
   // Terminator to shut down threads
   std::atomic<bool> &terminator;
@@ -25,16 +25,16 @@ class orchestrator_t {
   parallel_node_t<C>* prev_hashed_node;
 
   // Absolute count of node buffer tail node
-  node_id_t tail_node;
+  node_id_t<C> tail_node;
   // Tail node of the parent node buffer
-  node_id_t tail_node_parents;
+  node_id_t<C> tail_node_parents;
   // The oldest node fully written to disk
   node_buffer_iterator_t tail_node_write;
   // The next node to write to disk
   node_buffer_iterator_t head_node_write;
   // The oldest node being hashed by the hashers
-  node_id_t min_node_hash;
-  
+  node_id_t<C> min_node_hash;
+
   // Stat counters
   uint64_t cached_parents;
   uint64_t reads_issued;
@@ -69,13 +69,13 @@ class orchestrator_t {
 
   int parents_fd;
   uint32_t* parents_buf;
-  parent_iter_t parent_iter;
+  parent_iter_t<C> parent_iter;
 
 public:
   orchestrator_t(std::atomic<bool> &_terminator,
                  system_buffers_t<C>& _system,
-                 node_id_t _node_start,
-                 node_id_t _node_stop,
+                 node_id_t<C> _node_start,
+                 node_id_t<C> _node_stop,
                  const char* parents_file) :
     terminator(_terminator),
     system(_system),
@@ -97,13 +97,13 @@ public:
     }
     struct stat statbuf;
     fstat(parents_fd, &statbuf);
-    if ((size_t)statbuf.st_size != parent_iter_t::bytes()) {
+    if ((size_t)statbuf.st_size != parent_iter_t<C>::bytes(C::GetNumNodes())) {
       printf("Found size %ld bytes for parents file %s. Expected %ld bytes.\n",
-             statbuf.st_size, parents_file, parent_iter_t::bytes());
+             statbuf.st_size, parents_file, parent_iter_t<C>::bytes(C::GetNumNodes()));
       exit(1);
     }
-    
-    parents_buf = (uint32_t*)mmap(NULL, parent_iter_t::bytes(),
+
+    parents_buf = (uint32_t*)mmap(NULL, parent_iter_t<C>::bytes(C::GetNumNodes()),
                                   PROT_READ, MAP_PRIVATE, parents_fd, 0);
     if (parents_buf == MAP_FAILED) {
       perror("mmap failed for parents file");
@@ -135,7 +135,7 @@ public:
   }
 
   ~orchestrator_t() {
-    munmap(parents_buf, parent_iter_t::bytes());
+    munmap(parents_buf, parent_iter_t<C>::bytes(C::GetNumNodes()));
     close(parents_fd);
   }
 
@@ -153,25 +153,25 @@ public:
   // Issue a batch of reads. A batch in this case is PAGE_BATCH_SIZE sized
   // and consumes one node and all parents, which are sent as a batch to the IO.
   __attribute__ ((noinline))
-  size_t read_batch(node_id_t min_hash_node, node_buffer_iterator_t& tail_node_write,
+  size_t read_batch(node_id_t<C> min_hash_node, node_buffer_iterator_t& tail_node_write,
                     bool &advanced, size_t remaining_nodes) {
     // Maximum number of reads we will do
     const size_t MAX_READ_BATCH = C::NODES_PER_PAGE * 2;
     // To simplify the logic always read on page boundaries. This way we don't
-    // have to manage pages with some nodes hashed and some not. 
+    // have to manage pages with some nodes hashed and some not.
     const size_t BATCH_INCREMENT = C::NODES_PER_PAGE;
 
 #ifdef TSC
     uint64_t tsc;
     uint64_t tsc_start = get_tsc();
 #endif
-    
+
     advanced = false;
 
     ////////////////////////////////////////////////////////////
     // Determine how many nodes to read
     ////////////////////////////////////////////////////////////
-    
+
     size_t parent_read_fifo_free = system.parent_read_fifo.free_count();
     size_t node_buffer_free = system.node_buffer.free_count();
     size_t parent_buffer_free = system.parent_buffer.free_count();
@@ -201,7 +201,7 @@ public:
     if (max_batch == 0) {
       return 0;
     }
-    
+
 #ifdef TSC
     tsc = get_tsc();
     rb_check_buf_cycles += tsc - tsc_start;
@@ -211,7 +211,7 @@ public:
     ////////////////////////////////////////////////////////////
     // Reserve buffer entries
     ////////////////////////////////////////////////////////////
-    
+
     // Reserve all parent buffers
     size_t parent_buffer_id;
     page_batch_ptr_t page_batch_ptrs[max_batch];
@@ -228,31 +228,31 @@ public:
     rb_reserve_buf_cycles += tsc - tsc_start;
     tsc_start = tsc;
 #endif
-    
+
     ////////////////////////////////////////////////////////////
     // Determine caching parameters
     ////////////////////////////////////////////////////////////
-    
+
     // To determine if we can reference cached data we need to know if the parent
     // is in the node buffer.
     // Don't cache nodes less than the parent buffer cache size from the tail or it can
     // prevent forward progress with reading nodes.
     size_t cache_skid_size = PARENT_BUFFER_BATCHES;
-    
+
     // Number of nodes in the buffer
-    node_id_t node = parent_iter.get_node(); // node we're reading parents for
+    node_id_t<C> node = parent_iter.get_node(); // node we're reading parents for
     size_t node_buffer_count = system.node_buffer.size() * C::NODES_PER_PAGE - max_batch;
-    node_id_t cache_min_node = node - node_buffer_count;
-    node_id_t cache_min_cacheable_node =
-      std::min(node_id_t(cache_min_node + cache_skid_size), // Keep space from the tail
+    node_id_t<C> cache_min_node = node - node_buffer_count;
+    node_id_t<C> cache_min_cacheable_node =
+      std::min(node_id_t<C>(cache_min_node + cache_skid_size), // Keep space from the tail
           // Always reference the cache for nodes not yet written to disk
           tail_node_write.abs());
-    
+
     // printf("Reading parents for node %lx: node_buffer_count %ld cache_min_node %08lx "
     //        "cache_min_cacheable_node %08lx, head_node_write %lx\n",
     //        node.id(), node_buffer_count, cache_min_node.id(), cache_min_cacheable_node.id(),
     //        tail_node_write.abs().id());
-    
+
 #ifdef TSC
     tsc = get_tsc();
     rb_cache_params_cycles += tsc - tsc_start;
@@ -265,15 +265,15 @@ public:
     size_t total_reads_issued = 0;
     for (size_t i = 0; i < max_batch;
          i++, parent_buffer_id = system.parent_buffer.incr(parent_buffer_id)) {
-      
-      node_id_t node = parent_iter.get_node(); // node we're reading parents for
+
+      node_id_t<C> node = parent_iter.get_node(); // node we're reading parents for
       size_t node_in_node_buffer_page = node.node() % C::NODES_PER_PAGE;
       parallel_node_t<C>* cur_node_buffer =
         &node_batch_ptrs[i / C::NODES_PER_PAGE]->batch[0].parallel_nodes[node_in_node_buffer_page];
       if (i > 0 && node_in_node_buffer_page == 0) {
         cur_node_buffer_id = system.node_buffer.incr(cur_node_buffer_id);
       }
-      
+
       // Get the parent pointers for this batch
       typename system_buffers_t<C>::page_batch_t* page_batch =
         page_batch_ptrs[i];
@@ -285,13 +285,13 @@ public:
         &system.parent_ptrs[parent_buffer_id];
       typename system_buffers_t<C>::parent_ptr_sync_batch_t* ptr_sync_batch =
         &system.parent_ptr_syncs[parent_buffer_id];
-      
+
 #ifdef TSC
       tsc = get_tsc();
       rb_reserve_buf_cycles += tsc - tsc_start;
       tsc_start = tsc;
 #endif
-      
+
       size_t parent_start_idx = 0;
       // Special case: For the first node the first layer there are no parents
       if (node.id() == 0) {
@@ -302,7 +302,7 @@ public:
           ptr_batch->batch[j + 1].ptr = nullptr;
           ptr_sync_batch->batch[j + 1].node_buffer_idx = parent_ptr_sync_t::NOT_NODE_BUFFER;
           parent_iter++;
-        }   
+        }
         // Increment the valid counter for the batch
         system.parent_buffer.incr_valid(parent_buffer_id, system.parent_buffer.VALID_THRESHOLD);
         prev_hashed_node = cur_node_buffer;
@@ -324,14 +324,14 @@ public:
         assert (parent_iter.get_parent() == 0);
 
         ptr_batch->batch[0].ptr = prev_hashed_node;
-        assert(system_buffers_t<C>::node_batch_t::BATCH_SIZE == 1);
+        assert((system_buffers_t<C>::node_batch_t::BATCH_SIZE == 1));
         ptr_sync_batch->batch[0].node_buffer_idx = parent_ptr_sync_t::LOCAL_NODE;
         // Since this is within COORD_BATCH_NODE_COUNT we don't set a reference count
-        
+
         // Increment the parent pointer
         parent_iter++;
       }
-      
+
 #ifdef TSC
       tsc = get_tsc();
       rb_special_case_cycles += tsc - tsc_start;
@@ -341,17 +341,17 @@ public:
       ////////////////////////////////////////////////////////////
       // Process the parents for a node
       ////////////////////////////////////////////////////////////
-      
-      node_id_t parent_node;
+
+      node_id_t<C> parent_node;
       size_t node_in_page;
       size_t reads_issued = 0;
       for (size_t j = parent_start_idx; j < PAGE_BATCH_SIZE; j++) {
         assert (node == parent_iter.get_node());
-        
+
         // printf("Reading node %ld parent %ld prev_node %p\n",
         //        node, parent_iter.get_parent(), prev_node);
         node_io_t *io = &io_batch->batch[j];
-        
+
         if (node.layer() == 0 && parent_iter.is_prev_layer()) {
           // Special case: There are no expander parents for the first layer so just map them
           // to the previous node.
@@ -360,7 +360,7 @@ public:
         } else {
           parent_node = *parent_iter;
         }
-        
+
         // Use the node buffer for cached parents
         // In this case we set the IO type to NOP and update the synchronization structures.
         bool use_cache = parent_node >= cache_min_cacheable_node;
@@ -372,7 +372,7 @@ public:
 
         if (use_cache) {
           // Compute the entry in the node buffer where the data will be
-          node_id_t parent_node_cache_offset = parent_node - cache_min_node;
+          node_id_t<C> parent_node_cache_offset = parent_node - cache_min_node;
           size_t node_buffer_entry =
             system.node_buffer.add(system.node_buffer.get_tail(),
                                    parent_node_cache_offset.id() / C::NODES_PER_PAGE);
@@ -384,14 +384,14 @@ public:
           }
           assert(parent_node_cache_offset.id() < node_buffer_count + i);
           io->type = node_io_t::type_e::NOP;
-          
+
           // Address correct node in the page
           node_in_page = parent_node.node() % C::NODES_PER_PAGE;
           assert(node_batch_t::BATCH_SIZE == 1);
 
           // Store in j + 1 in the batch since the ptr batch size is one larger than page batch
           // and the zeroeth entry references the previous hashed node.
-          
+
           // It's a bit expensive to access the entry through the ring buffer since it stores
           // pointers and requires a dereference. Instead we can compute the node buffer pointer.
           node_batch_t* node_buffer_ptr = system.node_buffer_store;
@@ -407,7 +407,7 @@ public:
             // This is a bit expensive since we need to increment a random node's reference count
             system.node_buffer_sync[NODE_IDX_TO_SYNC_IDX(node_buffer_entry)].reference_count++;
           }
-          
+
           // printf("Using cache for node %lx parent %ld parent_cache_offset %08lx "
           //        "entry %ld subentry %ld %p\n",
           //        node.id(), parent_node.id(), parent_node_cache_offset.id(), node_buffer_entry,
@@ -415,14 +415,14 @@ public:
         } else {
           io->node = parent_node.id();
           io->type = node_io_t::type_e::READ;
-          
+
           // Address correct node in the page
           node_in_page = parent_node.node() % C::NODES_PER_PAGE;
           // Store in j + 1 since the ptr batch size is one larger than page batch
           // and the zeroeth entry references the previous hashed node.
           ptr_batch->batch[j + 1].ptr = &page_batch->batch[j].parallel_nodes[node_in_page];
           ptr_sync_batch->batch[j + 1].node_buffer_idx = parent_ptr_sync_t::NOT_NODE_BUFFER;
-          
+
 #ifdef NO_DISK_READS
           io->type = node_io_t::type_e::NOP;
           io->valid->fetch_add(1, DEFAULT_MEMORY_ORDER);
@@ -433,18 +433,18 @@ public:
           //          parent_node.id(), cur_node_buffer_id, ptr_batch->batch[j + 1].ptr);
           reads_issued++;
         }
-        
+
         // Advance the node/parent counters
         parent_iter++;
       }
       total_reads_issued += reads_issued;
-        
+
 #ifdef TSC
       tsc = get_tsc();
       rb_parents_cycles += tsc - tsc_start;
       tsc_start = tsc;
 #endif
-      
+
       // Increment the valid point to cover the cached entries
       size_t num_cached_in_batch = system.parent_buffer.VALID_THRESHOLD - reads_issued;
       system.parent_buffer.incr_valid(parent_buffer_id, num_cached_in_batch);
@@ -453,16 +453,16 @@ public:
 #ifdef NO_DISK_READS
       assert (system.parent_buffer.is_valid(parent_buffer_id));
 #endif
-      
+
       prev_hashed_node = cur_node_buffer;
-      
-      // Send 
+
+      // Send
 #ifndef NO_DISK_READS
       SPDK_ERROR(system.parent_read_fifo.enqueue_nocheck(io_batch));
 #endif
     }
     advanced = true;
-    
+
 #ifdef TSC
     tsc = get_tsc();
     rb_send_cycles += tsc - tsc_start;
@@ -476,7 +476,7 @@ public:
   //   head_node_write     - The next node to write to disk
   //   min_node_hash       - The next node to hash
   //   head_node_write_idx - The page index in the node buffer of head_node_write
-  size_t write_nodes(node_buffer_iterator_t& head_node_write, node_id_t min_node_hash) {
+  size_t write_nodes(node_buffer_iterator_t& head_node_write, node_id_t<C> min_node_hash) {
     size_t head_page_write = head_node_write.abs().id() / C::NODES_PER_PAGE;
     size_t min_page_hash = min_node_hash.id() / C::NODES_PER_PAGE;
     if (!(head_page_write < min_page_hash)) {
@@ -496,7 +496,7 @@ public:
     // Use the full node ID here since we need to write out all layers
     io->node = head_node_write.abs().id();
     assert(system.node_buffer.get_valid(head_node_write.idx()) == 0);
-    
+
     // printf("Write node %ld, node idx %ld to block %ld\n",
     //        head_node_write.abs().id(), head_node_write.idx(), head_node_write.abs().id());
     // char prefix[32];
@@ -505,11 +505,11 @@ public:
     // for (size_t i = 0; i < C::NODES_PER_PAGE; i++) {
     //   print_node(&node[i], 2, prefix);
     // }
-    
+
     //io->valid->fetch_add(1, DEFAULT_MEMORY_ORDER); // TODO: perform the actual write
-    // Send 
+    // Send
     SPDK_ERROR(system.node_write_fifo.enqueue(io_batch));
-    
+
     return C::NODES_PER_PAGE;
   }
 
@@ -533,7 +533,7 @@ public:
     size_t ACTION_BATCH = 8;
     size_t actions_remaining;
 
-    node_id_t node = parent_iter.get_node();
+    node_id_t<C> node = parent_iter.get_node();
 
     // Keep track of actions taken last iteration
 #ifdef PRINT_STALLS
@@ -545,7 +545,7 @@ public:
 
     size_t no_action_run_length = 0;
 #endif
-    
+
 #ifdef TSC
     uint64_t tsc;
     tsc_start = get_tsc();
@@ -558,7 +558,7 @@ public:
     uint64_t advance_written_cycles_update = 0;
     uint64_t advance_tail_cycles_update = 0;
 #endif
-    
+
 
     while (node < node_stop
            || tail_node_write.abs() < node_stop
@@ -570,14 +570,14 @@ public:
       tsc_start = tsc;
 #endif
 
-      node_id_t next_node = parent_iter.get_node();
+      node_id_t<C> next_node = parent_iter.get_node();
 
 #ifdef TSC
       tsc = get_tsc();
       parent_cycles_update = tsc - tsc_start;
       tsc_start = tsc;
 #endif
-      
+
 #ifdef STATS
       system.record_stats();
       // if (parent_iter.get_node().node() > 0 &&
@@ -586,7 +586,7 @@ public:
       //   system.print_periodic_stats();
       // }
 #endif
-      
+
       //////////////////////////////////////////////////////////////////////
       // Parent reading
       //////////////////////////////////////////////////////////////////////
@@ -594,25 +594,25 @@ public:
       // Determine the oldest node that has been hashed
       min_node_hash = system.coordinator_node[0]->load(DEFAULT_MEMORY_ORDER);
       for (size_t i = 1; i < system.coordinators.size(); i++) {
-        node_id_t n = system.coordinator_node[i]->load(DEFAULT_MEMORY_ORDER);
+        node_id_t<C> n = system.coordinator_node[i]->load(DEFAULT_MEMORY_ORDER);
         min_node_hash = std::min(min_node_hash, n);
       }
 
       // And factoring in writing the nodes to disk, the oldest node we need
       // to keep in the node buffer.
-      node_id_t min_node = std::min(min_node_hash, tail_node_write.abs());
+      node_id_t<C> min_node = std::min(min_node_hash, tail_node_write.abs());
 
       system.head_minus_hashed_stats.record(parent_iter.get_node() - min_node_hash);
       system.hashed_minus_written_stats.record(min_node_hash - tail_node_write.abs());
       system.written_minus_tail_stats.record(tail_node_write.abs() - tail_node);
-      
+
 #ifdef PRINT_STALLS
       last_iter_read_nodes = false;
       last_iter_wrote_nodes = false;
       last_iter_released_parents = false;
       last_iter_advanced_written = false;
       last_iter_advanced_tail_node = false;
-#endif      
+#endif
 #ifdef TSC
       tsc = get_tsc();
       min_node_cycles_update = tsc - tsc_start;
@@ -637,7 +637,7 @@ public:
       read_batch_cycles_update = advanced ? tsc - tsc_start : 0;
       tsc_start = tsc;
 #endif
-      
+
       // Initiate a write of hashed nodes to disk
       bool initiated_writes = false;
       actions_remaining = ACTION_BATCH;
@@ -660,7 +660,7 @@ public:
 #endif
       // Release parent buffers as soon as they are no longer needed by hashers
       actions_remaining = ACTION_BATCH;
-      while (actions_remaining-- > 0 && tail_node_parents < min_node_hash) { 
+      while (actions_remaining-- > 0 && tail_node_parents < min_node_hash) {
         typename system_buffers_t<C>::parent_ptr_sync_batch_t* ptr_sync_batch =
           &system.parent_ptr_syncs[system.parent_buffer.get_tail()];
         for (size_t j = 0; j < PARENT_PTR_BATCH_SIZE; j++) {
@@ -680,7 +680,7 @@ public:
       release_parent_cycles_update = tsc - tsc_start;
       tsc_start = tsc;
 #endif
-      
+
       // Advance the written node tail as nodes are written to disk
       actions_remaining = ACTION_BATCH;
       while (actions_remaining-- > 0 &&
@@ -698,7 +698,7 @@ public:
       advance_written_cycles_update = tsc - tsc_start;
       tsc_start = tsc;
 #endif
-      
+
       // Release the node buffer entries only as needed (when the node buffer
       // is full) to maximize caching.
       actions_remaining = ACTION_BATCH;
@@ -719,7 +719,7 @@ public:
             break;
           }
         }
-          
+
         // Release buffers once all nodes are used in the page
         if ((tail_node.node() % C::NODES_PER_PAGE) == C::NODES_PER_PAGE - 1) {
           system.node_buffer.release();
@@ -736,7 +736,7 @@ public:
       tsc_start = tsc;
 #endif
       node = next_node;
-      
+
       if (parent_iter.get_node().id() - tail_node.id() >=
           NODE_BUFFER_BATCHES * C::NODES_PER_PAGE) {
         printf("Unexpected tail/parent node values: %lu - %lu = %lu > %lu\n",
@@ -801,7 +801,7 @@ public:
       uint64_t mbytes = (nodes_rw * BLOCK_SIZE) >> 20;
       printf("Reading/writing took %ld ms for %ld pages / %ld MB (%0.2lf MB/s), "
              "%0.2lf IOPs\n",
-             ms, nodes_rw, mbytes, 
+             ms, nodes_rw, mbytes,
              (double)mbytes / ((double)ms / 1000.0),
              (double)nodes_rw / ((double)ms / 1000.0));
     }
@@ -823,7 +823,7 @@ public:
 //     printf("orchestrator_t advance_tail_cycles      %lu\n", advance_tail_cycles);
 //     printf("orchestrator_t noaction_cycles          %lu\n", noaction_cycles);
 // #endif
-    
+
 //     print_stats();
     return 0;
   }
@@ -837,7 +837,7 @@ public:
            parent_read_fifo_full, io_req_pool_empty,
            parent_buffer_full, node_buffer_full, from_hashers_empty,
            no_action, node_write_fifo_full);
-    
+
     printf("parent_buffer "); system.parent_buffer.print();
   }
 };

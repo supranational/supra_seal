@@ -7,11 +7,12 @@
 #define __POSEIDON_HPP__
 
 #include <cstdint>
-#include "blst_t.hpp"
+#include <blst_t.hpp>
+#include <ff/bls12-381.hpp>
 
 class Poseidon {
  public:
-  static constexpr vec256 BLS12_381_r = { 
+  static constexpr vec256 BLS12_381_r = {
       TO_LIMB_T(0xffffffff00000001), TO_LIMB_T(0x53bda402fffe5bfe),
       TO_LIMB_T(0x3339d80809a1d805), TO_LIMB_T(0x73eda753299d7d48)
   };
@@ -33,14 +34,14 @@ class Poseidon {
 
  protected:
   void QuinticSBox(fr_t& element, const fr_t& round_constant);
-  void MatrixMul(fr_t* elements, const fr_t* matrix); 
+  void MatrixMul(fr_t* elements, const fr_t* matrix);
   void SparseMatrixMul(fr_t* elements, const fr_t* sparse_matrix);
   void RoundMatrixMul(fr_t* elements, const int current_round);
   void FullRound(fr_t* elements, int& rk_offset, int& current_round);
   void LastFullRound(fr_t* elements, const fr_t* mds_matrix);
   void PartialRound(fr_t* elements, int& rk_offset, int& current_round);
 
-  void AssignPointers(fr_t* constants_file, 
+  void AssignPointers(fr_t* constants_file,
                       fr_t** round_constants, fr_t** mds_matrix,
                       fr_t** pre_sparse_matrix, fr_t** sparse_matrices);
 

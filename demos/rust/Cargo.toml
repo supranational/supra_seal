@@ -10,9 +10,7 @@ name = "c2"
 path = "src/c2.rs"
 
 [features]
-default = ["32GiB"]
-512MiB = []
-32GiB = []
+default = []
 
 [dependencies]
 anyhow = "1.0.26"

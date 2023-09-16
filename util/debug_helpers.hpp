@@ -9,14 +9,15 @@
 #include <x86intrin.h>   // x86 intrinsics
 #include "../sealing/data_structures.hpp" // global parameters
 
+template<class P_>
 void print_parameters();
 
-void print_digest(uint32_t* digest); 
+void print_digest(uint32_t* digest);
 void print_buffer(uint8_t* buf, size_t bytes);
 void print_buffer_dec(uint8_t* buf, size_t bytes);
 template<class T> void Log256(const __m256i & value);
 template<class T> void Log128(const __m128i & value);
-void print_digest_reorder(uint32_t* digest); 
+void print_digest_reorder(uint32_t* digest);
 
 // TODO: print plain node
 template<class C>

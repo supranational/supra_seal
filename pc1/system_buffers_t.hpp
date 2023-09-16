@@ -19,7 +19,7 @@ public:
   typedef ring_buffer_t<page_batch_t,
                         page_batch_t::BATCH_SIZE,
                         PARENT_BUFFER_BATCHES> parent_buffer_t;
-  
+
   typedef batch_t<parent_ptr_t<C>, PARENT_PTR_BATCH_SIZE> parent_ptr_batch_t;
   typedef batch_t<parent_ptr_sync_t, PARENT_PTR_BATCH_SIZE> parent_ptr_sync_batch_t;
 
@@ -28,15 +28,15 @@ public:
 
   typedef ring_buffer_t<node_batch_t, node_batch_t::BATCH_SIZE,
                         NODE_BUFFER_BATCHES> node_buffer_t;
-  typedef ring_counter_t<node_id_t, NODE_BUFFER_BATCHES * C::NODES_PER_PAGE,
+  typedef ring_counter_t<node_id_t<C>, NODE_BUFFER_BATCHES * C::NODES_PER_PAGE,
                          C::NODES_PER_PAGE> node_buffer_iterator_t;
-  
-  
+
+
   // Ring buffer for the parent pages
   parent_buffer_t parent_buffer;
   // Contiguous storage for page buffers
   spdk_ptr_t<page_batch_t> parent_buffer_store;
-  
+
   // Parallel array to the ring buffer hold IO meta data
   spdk_ptr_t<page_io_batch_t> parent_buffer_io;
 
@@ -45,10 +45,10 @@ public:
   // Parent synchronization structures. This array is parallel to parent_buffer and
   // indexed in the same way
   spdk_ptr_t<parent_ptr_sync_batch_t> parent_ptr_syncs;
-  
+
   // Ring buffer for sealed nodes
   node_buffer_t node_buffer;
-  
+
   // Contiguous storage for the node buffer
   spdk_ptr_t<node_batch_t> node_buffer_store;
   // Parallel array to the node buffer hold IO meta data
@@ -74,14 +74,14 @@ public:
 
   // Hashing status, from hashing threads to storage core.
   // Records the latest hashed node
-  std::vector<std::atomic<node_id_t>*> coordinator_node;
+  std::vector<std::atomic<node_id_t<C>>*> coordinator_node;
 
   // Coordinator pointers
   std::vector<coordinator_t<C>*> coordinators;
 
   // Pointer to the parent reader
   node_rw_t<C, page_io_batch_t>* parent_reader;
-  
+
   orchestrator_t<C>* orchestrator;
   queue_stat_t parent_buffer_stats;
   queue_stat_t node_buffer_stats;
@@ -143,11 +143,10 @@ public:
       }
     }
 
-
     // Allocate the node writer fifo
     SPDK_ERROR(node_write_fifo.create("node_write_fifo", disk_fifo_depth));
     //printf("node_write_fifo depth %ld batches\n", disk_fifo_depth);
-    
+
     // Allocate the node_buffer
     node_buffer_store.alloc(NODE_BUFFER_BATCHES);
     SPDK_ERROR(node_buffer.create(node_buffer_store));
@@ -173,7 +172,7 @@ public:
     }
 
     for (size_t i = 0; i < coordinator_node.size(); i++) {
-      coordinator_node[i] = new std::atomic<node_id_t>();
+      coordinator_node[i] = new std::atomic<node_id_t<C>>();
     }
 
     parent_buffer_stats.init("parent_buffer", parent_buffer.capacity());
@@ -227,7 +226,7 @@ public:
     parent_buffer_full_stats.snapshot();
     node_buffer_full_stats.snapshot();
     parent_read_fifo_full_stats.snapshot();
-    
+
     parent_buffer_stats.print();
     node_buffer_stats.print();
     read_fifo_stats.print();

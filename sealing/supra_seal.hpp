@@ -28,6 +28,6 @@ extern std::mutex print_mtx;
 #include "../pc1/coordinator_t.hpp"
 #include "supra_seal.h"
 
-int node_read(size_t num_sectors, uint64_t node_to_read);
+int node_read(size_t sector_size, size_t num_sectors, uint64_t node_to_read);
 
 #endif

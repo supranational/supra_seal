@@ -28,20 +28,23 @@
 #ifndef __CUDA_ARCH__
 #include "../pc1/tree_r.hpp"
 #include "../util/debug_helpers.cpp"
-#include "../sealing/sector_parameters.cpp"
+#include "../sealing/sector_parameters.hpp"
+#include "../util/sector_util.cpp"
 
 void usage(char* argv[]) {
   std::cout << "If no staged data file, CC is assumed" << std::endl;
   std::cout << "Usage: " << argv[0] << " [OPTIONS]" << std::endl;
-  std::cout << "-h        Print help message" << std::endl;
-  std::cout << "-c <int>  Parallel number of cores" << std::endl;
-  std::cout << "-l <path> Last layer file" << std::endl;
-  std::cout << "-d <path> Staged data file" << std::endl;
-  std::cout << "-o <path> Output directory" << std::endl;
+  std::cout << "-h          Print help message" << std::endl;
+  std::cout << "-c <int>    Parallel number of cores" << std::endl;
+  std::cout << "-l <path>   Last layer file" << std::endl;
+  std::cout << "-d <path>   Staged data file" << std::endl;
+  std::cout << "-o <path>   Output directory" << std::endl;
+  std::cout << "-b <string> Sector size e.g 32GiB" << std::endl;
   exit(0);
 }
 
 #ifdef __NVCC__
+template<class P>
 void gpu_tree_r(std::string config_filename,
                 std::string last_layer_filename,
                 std::string data_filename,
@@ -49,26 +52,23 @@ void gpu_tree_r(std::string config_filename,
   topology_t topology(config_filename.c_str());
   set_core_affinity(topology.pc2_hasher);
 
-  // Get the sector size
-  size_t sector_size = SECTOR_SIZE;
-  SectorParameters params(sector_size);
-        
   // Total number of streams across all GPUs
-  size_t stream_count = 64;
+  // Use less streams if sector size is <= 16MiB
+  size_t stream_count = P::GetSectorSizeLg() <= 24 ? 8 : 64;
 
   // Batch size in nodes. Each node includes all parallel sectors
-  size_t batch_size = 64 * 64;
+  // Reduce batch size if sector size is <= 16MiB
+  size_t batch_size = P::GetSectorSizeLg() <= 24 ? 64 * 8 : 64 * 64;
 
   // Nodes to read per partition
-  size_t nodes_to_read = params.GetNumNodes() / params.GetNumTreeRCFiles();
+  size_t nodes_to_read = P::GetNumNodes() / P::GetNumTreeRCFiles();
 
   std::vector<std::string> layer_filenames;
   layer_filenames.push_back(last_layer_filename);
-  streaming_node_reader_t<sealing_config1_t> node_reader
-    (params, layer_filenames, sector_size);
-  
+  streaming_node_reader_t<sealing_config_t<1, P>> node_reader(P::GetSectorSize(), layer_filenames);
+
   // Allocate storage for 2x the streams to support tree-c and tree-r
-  node_reader.alloc_slots(stream_count * 2, params.GetNumLayers() * batch_size, true);
+  node_reader.alloc_slots(stream_count * 2, P::GetNumLayers() * batch_size, true);
 
   bool tree_r_only = true;
   const char* data_filenames[1];
@@ -77,9 +77,9 @@ void gpu_tree_r(std::string config_filename,
   } else {
     data_filenames[0] = nullptr;
   }
-  pc2_hash<sealing_config1_t>(params, topology, tree_r_only, node_reader,
-                              nodes_to_read, batch_size, stream_count,
-                              data_filenames, output_dir.c_str());
+  pc2_hash<sealing_config_t<1, P>>(topology, tree_r_only, node_reader,
+                                   nodes_to_read, batch_size, stream_count,
+                                   data_filenames, output_dir.c_str());
 }
 #endif
 
@@ -89,9 +89,10 @@ int main(int argc, char* argv[]) {
   std::string data_filename       = "";
   std::string out_dir             = "";
   int cores                       = 0;
+  std::string sector_size_string  = "";
   std::string config_filename     = "demos/rust/supra_seal.cfg";
-  
-  while ((opt = getopt(argc, argv, "l:d:o:c:h")) != -1) {
+
+  while ((opt = getopt(argc, argv, "l:d:o:c:b:h")) != -1) {
     switch(opt) {
       case 'c':
        std::cout << "number of cores input " << optarg << std::endl;
@@ -109,6 +110,10 @@ int main(int argc, char* argv[]) {
         std::cout << "out_dir                   " << optarg << std::endl;
         out_dir = optarg;
         break;
+      case 'b':
+        std::cout << "sector_size               " << optarg << std::endl;
+        sector_size_string = optarg;
+        break;
       case 'h':
       case ':':
       case '?':
@@ -117,19 +122,29 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  size_t sector_size = get_sector_size_from_string(sector_size_string);
+
   if (last_layer_filename.empty()) {
     printf("-l <last_layer_file> must be specified\n");
     usage(argv);
   }
-  
+
 #ifdef __NVCC__
-  if (ngpus()) {
-    gpu_tree_r(config_filename, last_layer_filename, data_filename, out_dir);
-    return 0;
-  }
+  // Do PC2 on the GPU if sector size is > 32KiB
+  SECTOR_PARAMS_TABLE(                                                   \
+    if (ngpus() && params.GetSectorSizeLg() > 15) {                      \
+      gpu_tree_r<decltype(params)>(config_filename, last_layer_filename, \
+                                   data_filename, out_dir);              \
+                                                                         \
+      return 0;                                                          \
+    }                                                                    \
+  );
 #endif
-  TreeR tree_r;
-  tree_r.BuildTreeR(last_layer_filename, data_filename, out_dir, cores);
+  SECTOR_PARAMS_TABLE(                                                     \
+    TreeR<decltype(params)> tree_r;                                        \
+    tree_r.BuildTreeR(last_layer_filename, data_filename, out_dir, cores); \
+  );
+  
   return 0;
 }
 #endif

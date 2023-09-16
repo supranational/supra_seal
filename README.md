@@ -207,7 +207,7 @@ HugePages_Free:      36
 
 Additionally you may need to enable huge pages after boot using:
 ```
-sudo sysctl -w vm.nr_hugepages=128
+sudo sysctl -w vm.nr_hugepages=36
 ```
 
 Due to the random reads, if the page table was built with 4KB pages then there would be a significant number of costly faults. Moving to 1GB pages alleviates this problem.
@@ -228,7 +228,7 @@ During the build process it will clone and build SPDK, sppark, and blst.
 SPDK must be setup after every reboot:
 ```
 cd spdk-v22.09
-sudo env NRHUGE=128 ./scripts/setup.sh
+sudo env NRHUGE=36 ./scripts/setup.sh
 ```
 
 # Configuration
@@ -303,7 +303,7 @@ gantt
 
 ```
 # Rust
-./exec.sh
+./exec.sh -b 32GiB
 
 # C++
 ./build.sh # Also called automatically by exec.sh

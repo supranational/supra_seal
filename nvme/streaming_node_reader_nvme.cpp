@@ -18,7 +18,7 @@ struct streaming_node_reader_opaque_t {
   // Fixed size FIFOs for requests to the parent reader
   mt_fifo_t<node_io_batch_t> node_read_fifo;
   node_rw_t<C, node_io_batch_t>* node_reader;
-  
+
   spdk_ptr_t<page_t<C>> local_buffer;
   std::vector<node_io_batch_t> node_ios;
 };
@@ -30,7 +30,7 @@ streaming_node_reader_t(nvme_controllers_t* _controllers, size_t qpair,
   {
     num_slots = 0;
     opaque = new streaming_node_reader_opaque_t<C>();
-    
+
     // Streaming reads
     SPDK_ASSERT(opaque->node_read_fifo.create("node_read_fifo", 4 * nvme_controller_t::queue_size));
     opaque->node_reader = new node_rw_t<C, node_io_batch_t>
@@ -40,9 +40,9 @@ streaming_node_reader_t(nvme_controllers_t* _controllers, size_t qpair,
     reader_thread = std::thread([&, core_num, idle_sleep]() {
       set_core_affinity(core_num);
       assert(opaque->node_reader->process(idle_sleep) == 0);
-    });    
+    });
   }
-  
+
 template<class C> streaming_node_reader_t<C>::
 ~streaming_node_reader_t() {
   terminator = true;
@@ -95,14 +95,14 @@ load_layers(size_t slot, uint32_t layer, uint64_t node,
   assert (slot < num_slots);
   node_io_batch_t* node_ios = &opaque->node_ios[slot * pages_per_slot];
   page_t<C>* pages = &opaque->local_buffer[slot * pages_per_slot];
-      
+
   size_t total_pages = num_layers * node_count / C::NODES_PER_PAGE;
   assert (total_pages <= pages_per_slot);
 
   // Valid counter
   valid->store(0);
 
-  node_id_t node_to_read(layer, node);
+  node_id_t<C> node_to_read(layer, node);
 
   size_t idx = 0;
   uint32_t cur_layer = layer;
@@ -124,10 +124,10 @@ load_layers(size_t slot, uint32_t layer, uint64_t node,
     }
     // Increment the layer
     cur_layer++;
-    node_to_read = node_id_t(cur_layer, node);
+    node_to_read = node_id_t<C>(cur_layer, node);
   }
   *valid_count = total_pages;
-  
+
   return (uint8_t*)pages;
 }
 
@@ -143,12 +143,12 @@ load_nodes(size_t slot, std::vector<std::pair<size_t, size_t>>& nodes) {
     if (!opaque->node_read_fifo.is_full()) {
       node_io_t& io = node_ios[i].batch[0];
       io.type = node_io_t::type_e::READ;
-      io.node = node_id_t(nodes[i].first, nodes[i].second);
+      io.node = node_id_t<C>(nodes[i].first, nodes[i].second);
       io.valid = &valid;
       io.tracker.buf = (uint8_t*)&pages[i];
-        
+
       SPDK_ERROR(opaque->node_read_fifo.enqueue(&node_ios[i]));
-    }      
+    }
   }
   while (valid < nodes.size()) {}
   return 0;
@@ -168,11 +168,85 @@ get_node(size_t slot, std::vector<std::pair<size_t, size_t>>& nodes,
   return n;
 }
 
-template class streaming_node_reader_t<sealing_config128_t>;
-template class streaming_node_reader_t<sealing_config64_t>;
-template class streaming_node_reader_t<sealing_config32_t>;
-template class streaming_node_reader_t<sealing_config16_t>;
-template class streaming_node_reader_t<sealing_config8_t>;
-template class streaming_node_reader_t<sealing_config4_t>;
-template class streaming_node_reader_t<sealing_config2_t>;
-template class streaming_node_reader_t<sealing_config1_t>;
+#ifdef RUNTIME_SECTOR_SIZE
+template class streaming_node_reader_t<sealing_config_128_2KB_t>;
+template class streaming_node_reader_t<sealing_config_128_4KB_t>;
+template class streaming_node_reader_t<sealing_config_128_16KB_t>;
+template class streaming_node_reader_t<sealing_config_128_32KB_t>;
+template class streaming_node_reader_t<sealing_config_128_8MB_t>;
+template class streaming_node_reader_t<sealing_config_128_16MB_t>;
+template class streaming_node_reader_t<sealing_config_128_1GB_t>;
+template class streaming_node_reader_t<sealing_config_128_64GB_t>;
+template class streaming_node_reader_t<sealing_config_64_2KB_t>;
+template class streaming_node_reader_t<sealing_config_64_4KB_t>;
+template class streaming_node_reader_t<sealing_config_64_16KB_t>;
+template class streaming_node_reader_t<sealing_config_64_32KB_t>;
+template class streaming_node_reader_t<sealing_config_64_8MB_t>;
+template class streaming_node_reader_t<sealing_config_64_16MB_t>;
+template class streaming_node_reader_t<sealing_config_64_1GB_t>;
+template class streaming_node_reader_t<sealing_config_64_64GB_t>;
+template class streaming_node_reader_t<sealing_config_32_2KB_t>;
+template class streaming_node_reader_t<sealing_config_32_4KB_t>;
+template class streaming_node_reader_t<sealing_config_32_16KB_t>;
+template class streaming_node_reader_t<sealing_config_32_32KB_t>;
+template class streaming_node_reader_t<sealing_config_32_8MB_t>;
+template class streaming_node_reader_t<sealing_config_32_16MB_t>;
+template class streaming_node_reader_t<sealing_config_32_1GB_t>;
+template class streaming_node_reader_t<sealing_config_32_64GB_t>;
+template class streaming_node_reader_t<sealing_config_16_2KB_t>;
+template class streaming_node_reader_t<sealing_config_16_4KB_t>;
+template class streaming_node_reader_t<sealing_config_16_16KB_t>;
+template class streaming_node_reader_t<sealing_config_16_32KB_t>;
+template class streaming_node_reader_t<sealing_config_16_8MB_t>;
+template class streaming_node_reader_t<sealing_config_16_16MB_t>;
+template class streaming_node_reader_t<sealing_config_16_1GB_t>;
+template class streaming_node_reader_t<sealing_config_16_64GB_t>;
+template class streaming_node_reader_t<sealing_config_8_2KB_t>;
+template class streaming_node_reader_t<sealing_config_8_4KB_t>;
+template class streaming_node_reader_t<sealing_config_8_16KB_t>;
+template class streaming_node_reader_t<sealing_config_8_32KB_t>;
+template class streaming_node_reader_t<sealing_config_8_8MB_t>;
+template class streaming_node_reader_t<sealing_config_8_16MB_t>;
+template class streaming_node_reader_t<sealing_config_8_1GB_t>;
+template class streaming_node_reader_t<sealing_config_8_64GB_t>;
+template class streaming_node_reader_t<sealing_config_4_2KB_t>;
+template class streaming_node_reader_t<sealing_config_4_4KB_t>;
+template class streaming_node_reader_t<sealing_config_4_16KB_t>;
+template class streaming_node_reader_t<sealing_config_4_32KB_t>;
+template class streaming_node_reader_t<sealing_config_4_8MB_t>;
+template class streaming_node_reader_t<sealing_config_4_16MB_t>;
+template class streaming_node_reader_t<sealing_config_4_1GB_t>;
+template class streaming_node_reader_t<sealing_config_4_64GB_t>;
+template class streaming_node_reader_t<sealing_config_2_2KB_t>;
+template class streaming_node_reader_t<sealing_config_2_4KB_t>;
+template class streaming_node_reader_t<sealing_config_2_16KB_t>;
+template class streaming_node_reader_t<sealing_config_2_32KB_t>;
+template class streaming_node_reader_t<sealing_config_2_8MB_t>;
+template class streaming_node_reader_t<sealing_config_2_16MB_t>;
+template class streaming_node_reader_t<sealing_config_2_1GB_t>;
+template class streaming_node_reader_t<sealing_config_2_64GB_t>;
+template class streaming_node_reader_t<sealing_config_1_2KB_t>;
+template class streaming_node_reader_t<sealing_config_1_4KB_t>;
+template class streaming_node_reader_t<sealing_config_1_16KB_t>;
+template class streaming_node_reader_t<sealing_config_1_32KB_t>;
+template class streaming_node_reader_t<sealing_config_1_8MB_t>;
+template class streaming_node_reader_t<sealing_config_1_16MB_t>;
+template class streaming_node_reader_t<sealing_config_1_1GB_t>;
+template class streaming_node_reader_t<sealing_config_1_64GB_t>;
+#endif
+template class streaming_node_reader_t<sealing_config_128_512MB_t>;
+template class streaming_node_reader_t<sealing_config_128_32GB_t>;
+template class streaming_node_reader_t<sealing_config_64_512MB_t>;
+template class streaming_node_reader_t<sealing_config_64_32GB_t>;
+template class streaming_node_reader_t<sealing_config_32_512MB_t>;
+template class streaming_node_reader_t<sealing_config_32_32GB_t>;
+template class streaming_node_reader_t<sealing_config_16_512MB_t>;
+template class streaming_node_reader_t<sealing_config_16_32GB_t>;
+template class streaming_node_reader_t<sealing_config_8_512MB_t>;
+template class streaming_node_reader_t<sealing_config_8_32GB_t>;
+template class streaming_node_reader_t<sealing_config_4_512MB_t>;
+template class streaming_node_reader_t<sealing_config_4_32GB_t>;
+template class streaming_node_reader_t<sealing_config_2_512MB_t>;
+template class streaming_node_reader_t<sealing_config_2_32GB_t>;
+template class streaming_node_reader_t<sealing_config_1_512MB_t>;
+template class streaming_node_reader_t<sealing_config_1_32GB_t>;

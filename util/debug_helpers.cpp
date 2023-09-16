@@ -8,17 +8,19 @@
 #include <arpa/inet.h>       // htons
 #include "debug_helpers.hpp" // header
 
+template<class C>
 void print_parameters() {
   std::cout << "Sealing Parameters" << std::endl;
-  std::cout << "SECTOR_SIZE           "<< SECTOR_SIZE << std::endl;
+  std::cout << "SECTOR_SIZE           "<< C::GetSectorSize() << std::endl;
+  std::cout << "SECTOR_SIZE_LG        "<< C::GetSectorSizeLg() << std::endl;
   std::cout << "NODE_SIZE             "<< NODE_SIZE << std::endl;
   std::cout << "NODE_WORDS            "<< NODE_WORDS << std::endl;
-  std::cout << "NODE_COUNT            "<< NODE_COUNT << std::endl;
+  std::cout << "NODE_COUNT            "<< C::GetNumNodes() << std::endl;
   std::cout << "PARENT_COUNT_BASE     "<< PARENT_COUNT_BASE << std::endl;
   std::cout << "PARENT_COUNT_EXP      "<< PARENT_COUNT_EXP << std::endl;
   std::cout << "PARENT_COUNT          "<< PARENT_COUNT << std::endl;
   std::cout << "PARENT_SIZE           "<< PARENT_SIZE << std::endl;
-  std::cout << "LAYER_COUNT           "<< LAYER_COUNT << std::endl;
+  std::cout << "LAYER_COUNT           "<< C::GetNumLayers() << std::endl;
   std::cout << "NODES_PER_HASHER      "<< NODES_PER_HASHER << std::endl;
   std::cout << "PARENT_BUFFER_NODES   "<< PARENT_BUFFER_NODES << std::endl;
   std::cout << "NODE_BUFFER_NODES     "<< NODE_BUFFER_NODES << std::endl;
@@ -159,4 +161,3 @@ void print_parents_graph(uint32_t* parents) {
     printf("\n");
   }
 }
-
