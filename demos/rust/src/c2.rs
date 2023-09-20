@@ -94,7 +94,7 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
                     prover_id,
                     sector_id
                 )
-                    .unwrap();
+                .unwrap();
                 println!("seal_commit_phase2 took: {:.2?}", now.elapsed());
 
                 let result = verify_seal::<Tree>(
@@ -107,7 +107,7 @@ fn run_c2<Tree: 'static + MerkleTreeTrait>(
                     seed,
                     &commit_output.proof,
                 )
-                    .unwrap();
+                .unwrap();
 
                 if result == true {
                     println!("Verification PASSED!");

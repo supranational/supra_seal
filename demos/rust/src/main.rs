@@ -164,22 +164,26 @@ pub fn c1_wrapper<T: AsRef<std::path::Path>>(
 // Helper function to create replica ids
 fn create_replica_id(
     prover_id: ProverId,
-    _registered_proof: RegisteredSealProof,
+    sector_size_string: &str,
     sector_id: u64,
     comm_d: &[u8; 32],
     ticket: Ticket,
 ) -> ReplicaId {
-    //let config = registered_proof.as_v1_config();
+    let porep_id: [u8; 32] = match sector_size_string {
+        "2KiB"   => RegisteredSealProof::StackedDrg2KiBV1_1.as_v1_config().porep_id,
+        "8MiB"   => RegisteredSealProof::StackedDrg8MiBV1_1.as_v1_config().porep_id,
+        "512MiB" => RegisteredSealProof::StackedDrg512MiBV1_1.as_v1_config().porep_id,
+        "32GiB"  => RegisteredSealProof::StackedDrg32GiBV1_1.as_v1_config().porep_id,
+        "64GiB"  => RegisteredSealProof::StackedDrg64GiBV1_1.as_v1_config().porep_id,
+        _ => [99u8; 32], // use an arbitrary porep_id for other sizes
+    };
 
-    // For testing
-    let porep_seed: [u8; 32] = [99u8; 32]; // TODO - remove
     let hash = Sha256::new()
         .chain_update(&prover_id)
         .chain_update(sector_id.to_be_bytes())
         .chain_update(&ticket)
         .chain_update(comm_d)
-        //.chain_update(&config.porep_id)
-        .chain_update(&porep_seed)
+        .chain_update(&porep_id)
         .finalize();
 
     let mut id = [0u8; 32];
@@ -192,12 +196,11 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     num_sectors: usize,
     c2_cores: &str,
     parents_cache_filename: &str,
-    registered_proof: RegisteredSealProof,
     comm_d: [u8; 32],
     sector_size: usize,
-    _sector_size_string: &str,
+    sector_size_str: &str,
 ) {
-    let wait_seed_time = match _sector_size_string {
+    let wait_seed_time = match sector_size_str {
         "32GiB"  => Duration::from_secs(60 * 75), // 75 min
         "64GiB"  => Duration::from_secs(60 * 75),
         _ => Duration::from_secs(30),             // 30 sec
@@ -260,7 +263,7 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
         let pipeline_start = Arc::clone(&pipeline_start);
         let gpu_lock = Arc::clone(&gpu_lock);
 
-        let sector_size_string = _sector_size_string.to_string();
+        let sector_size_string = sector_size_str.to_string();
 
         let pipeline = thread::spawn(move || {
             let pipe_dir = "/var/tmp/supra_seal/".to_owned() + &batch_num.to_string();
@@ -275,7 +278,7 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
             for _ in 0..num_sectors {
                 let replica_id = create_replica_id(
                     prover_id,
-                    registered_proof,
+                    &sector_size_string,
                     cur_sector_id as u64,
                     &comm_d,
                     ticket);
@@ -524,21 +527,6 @@ fn pipeline_caller(num_sectors: usize, c2_cores: &str, sector_size_string: &str)
         _ => panic!("Invalid sector size"),
     };
 
-    // TODO: RegisteredSealProof is missing half of supported sector sizes
-    let registered_proof = match sector_size_string {
-        "2KiB"   => RegisteredSealProof::StackedDrg2KiBV1_1,
-        //"4KiB"   => RegisteredSealProof::StackedDrg4KiBV1_1,
-        //"16KiB"  => RegisteredSealProof::StackedDrg16KiBV1_1,
-        //"32KiB"  => RegisteredSealProof::StackedDrg32KiBV1_1,
-        "8MiB"   => RegisteredSealProof::StackedDrg8MiBV1_1,
-        //"16MiB"  => RegisteredSealProof::StackedDrg16MiBV1_1,
-        "512MiB" => RegisteredSealProof::StackedDrg512MiBV1_1,
-        //"1GiB"   => RegisteredSealProof::StackedDrg1GiBV1_1,
-        "32GiB"  => RegisteredSealProof::StackedDrg32GiBV1_1,
-        "64GiB"  => RegisteredSealProof::StackedDrg64GiBV1_1,
-        _ => panic!("Invalid sector size"),
-    };
-
     let sector_size: usize = match sector_size_string {
         "2KiB"   => 2048,
         "4KiB"   => 4096,
@@ -559,7 +547,6 @@ fn pipeline_caller(num_sectors: usize, c2_cores: &str, sector_size_string: &str)
         num_sectors,
         c2_cores,
         parents_cache_filename,
-        registered_proof,
         comm_d,
         sector_size,
         sector_size_string
@@ -576,7 +563,7 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() < 1 {
+    if args.len() < 2 {
         println!("Usage: supra-seal-demo <sector_size> e.g 32GiB");
         std::process::exit(-1);
     }

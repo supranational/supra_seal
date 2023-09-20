@@ -18,7 +18,7 @@ if [[ -z $SECTOR_SIZE ]]; then
     exit 1
 fi
 
-if [ "$SECTOR_SIZE" != "32GiB" &&  "$SECTOR_SIZE" != "512MiB"]; then
+if [[ "$SECTOR_SIZE" != "32GiB" && "$SECTOR_SIZE" != "512MiB" ]]; then
      RUNTIME="-r"
 fi
 
