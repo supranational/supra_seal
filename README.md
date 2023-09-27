@@ -227,9 +227,11 @@ During the build process it will clone and build SPDK, sppark, and blst.
 
 SPDK must be setup after every reboot:
 ```
-cd spdk-v22.09
+cd deps/spdk-v22.09
 sudo env NRHUGE=36 ./scripts/setup.sh
 ```
+
+During the setup process SPDK will take control of any NVMe drives that do not have a filesystem.
 
 # Configuration
 
