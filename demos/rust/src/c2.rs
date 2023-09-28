@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use bincode::deserialize;
-use filecoin_proofs_api::SectorId;
+use filecoin_proofs_api::{RegisteredSealProof, SectorId};
 use filecoin_proofs_v1::{
     PoRepConfig, ProverId, seal_commit_phase2, SealCommitPhase1Output,
     verify_seal, with_shape
@@ -131,11 +131,11 @@ fn c2_caller(
     c1_dir: &str,
     start_sector_id: usize,
     sector_size: u64,
+    porep_id: [u8; 32],
 ) -> usize {
-    let arbitrary_porep_id = [99; 32];
     let porep_config = Arc::new(PoRepConfig::new_groth16(
         sector_size,
-        arbitrary_porep_id,
+        porep_id,
         ApiVersion::V1_1_0));
 
     with_shape!(sector_size, run_c2, num_sectors, c1_dir, start_sector_id, porep_config)
@@ -173,7 +173,16 @@ fn main() {
         _ => panic!("Invalid sector size"),
     };
 
-    let successes = c2_caller(num_sectors, &c1_dir, start_sector_id, sector_size);
+    let porep_id: [u8; 32] = match sector_size_string.as_str() {
+        "2KiB"   => RegisteredSealProof::StackedDrg2KiBV1_1.as_v1_config().porep_id,
+        "8MiB"   => RegisteredSealProof::StackedDrg8MiBV1_1.as_v1_config().porep_id,
+        "512MiB" => RegisteredSealProof::StackedDrg512MiBV1_1.as_v1_config().porep_id,
+        "32GiB"  => RegisteredSealProof::StackedDrg32GiBV1_1.as_v1_config().porep_id,
+        "64GiB"  => RegisteredSealProof::StackedDrg64GiBV1_1.as_v1_config().porep_id,
+        _ => [99u8; 32], // use an arbitrary porep_id for other sizes
+    };
+    
+    let successes = c2_caller(num_sectors, &c1_dir, start_sector_id, sector_size, porep_id);
 
     std::process::exit((num_sectors - successes) as i32);
 }

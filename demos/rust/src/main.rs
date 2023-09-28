@@ -221,7 +221,7 @@ fn run_pipeline<Tree: 'static + MerkleTreeTrait>(
     // All sectors using the same prover id, ticket, and wait seed
     let prover_id: ProverId = [ 9u8; 32];
     let ticket: Ticket = [ 1u8; 32];
-    let seed: Ticket = [ 0u8; 32];
+    let seed: Ticket = [ 1u8; 32];
 
     // Example showing operations running in parallel
     let pc1_counter = Arc::new(Mutex::new((0, 0)));
@@ -506,9 +506,9 @@ fn pipeline_caller(num_sectors: usize, c2_cores: &str, sector_size_string: &str)
         "32KiB"  => "/var/tmp/filecoin-parents/v28-sdr-parent-81a0489b0dd6c7755cdce0917dd436288b6e82e17d596e5a23836e7a602ab9be.cache",
         "8MiB"   => "/var/tmp/filecoin-parents/v28-sdr-parent-1139cb33af3e3c24eb644da64ee8bc43a8df0f29fc96b5337bee369345884cdc.cache",
         "16MiB"  => "/var/tmp/filecoin-parents/v28-sdr-parent-7fa3ff8ffb57106211c4be413eb15ea072ebb363fa5a1316fe341ac8d7a03d51.cache",
-        "512MiB" => "/var/tmp/filecoin-parents/v28-sdr-parent-016f31daba5a32c5933a4de666db8672051902808b79d51e9b97da39ac9981d3.cache",
+        "512MiB" => "/var/tmp/filecoin-parents/v28-sdr-parent-7ba215a1d2345774ab90b8cb1158d296e409d6068819d7b8c7baf0b25d63dc34.cache",
         "1GiB"   => "/var/tmp/filecoin-parents/v28-sdr-parent-637f021bceb5248f0d1dcf4dbf132fedc025d0b3b55d3e7ac171c02676a96ccb.cache",
-        "32GiB"  => "/var/tmp/filecoin-parents/v28-sdr-parent-55c7d1e6bb501cc8be94438f89b577fddda4fafa71ee9ca72eabe2f0265aefa6.cache",
+        "32GiB"  => "/var/tmp/filecoin-parents/v28-sdr-parent-21981246c370f9d76c7a77ab273d94bde0ceb4e938292334960bce05585dc117.cache",
         "64GiB"  => "/var/tmp/filecoin-parents/v28-sdr-parent-767ee5400732ee77b8762b9d0dd118e88845d28bfa7aee875dc751269f7d0b87.cache",
         _ => panic!("Invalid sector size"),
     };

@@ -90,10 +90,10 @@ const uint8_t TICKET[]  __attribute__ ((aligned (32))) = { 1, 1, 1, 1, 1, 1, 1, 
 //                          99, 99, 99, 99, 99, 99, 99, 99,
 //                          99, 99, 99, 99, 99, 99, 99, 99,
 //                          99, 99, 99, 99, 99, 99, 99, 99 };
-const uint8_t SEED[] __attribute__ ((aligned (32))) = { 0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, 0, 0, 0 };
+const uint8_t SEED[] __attribute__ ((aligned (32))) = { 1, 1, 1, 1, 1, 1, 1, 1,
+                         1, 1, 1, 1, 1, 1, 1, 1,
+                         1, 1, 1, 1, 1, 1, 1, 1,
+                         1, 1, 1, 1, 1, 1, 1, 1 };
 
 // Default ordering for atomics
 static const std::memory_order DEFAULT_MEMORY_ORDER = std::memory_order_seq_cst;
