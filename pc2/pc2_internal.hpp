@@ -12,7 +12,7 @@
 #endif
 
 template<class C>
-void pc2_hash(SectorParameters& params, topology_t& topology,
+void pc2_hash(topology_t& topology,
               bool tree_r_only,
               streaming_node_reader_t<C>& _reader,
               size_t _nodes_to_read, size_t _batch_size,
@@ -20,6 +20,6 @@ void pc2_hash(SectorParameters& params, topology_t& topology,
               const char** data_filenames, const char* output_dir);
 
 template<class C>
-void do_pc2_cleanup(SectorParameters& params, const char* output_dir);
+void do_pc2_cleanup(const char* output_dir);
 
 #endif

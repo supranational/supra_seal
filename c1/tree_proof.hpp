@@ -317,6 +317,10 @@ class TreeDCCProof : public TreeProof {
                node_t** tree_bufs, size_t num_tree_bufs,
                size_t discard_rows) :
     TreeProof(arity, levels, tree_bufs, num_tree_bufs, discard_rows) {
+      // TODO: for 64GB would need to access the next layer. CC_TREE_D_NODE_VALUES
+      // would need to be filled in.
+      assert (levels <= 31);
+    
       SetRoot((node_t*)(CC_TREE_D_NODE_VALUES[levels]));
       SetLeaf((node_t*)(CC_TREE_D_NODE_VALUES[0]));
     }

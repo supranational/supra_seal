@@ -16,9 +16,10 @@
 #include "../sha/sha_functions.hpp"
 #include "../util/mmap_t.hpp"
 
+template<class P>
 class TreeD {
  public:
-  TreeD(SectorParameters* params, bool copy) : params_(params), copy_(copy) {}
+  TreeD(P params, bool copy) : params_(params), copy_(copy) {}
   ~TreeD() {}
 
   void print_digest_hex(const node_t* node) {
@@ -45,19 +46,19 @@ class TreeD {
   }
 
   void BuildCCTree(node_t* comm_d, std::string tree_d_filename) {
-    size_t arity = params_->GetNumTreeDArity();
+    size_t arity = params_.GetNumTreeDArity();
     size_t arity_lg = (size_t) log2(arity);
 
     // Open tree d
-    size_t cur_nodes = params_->GetSectorSize() / sizeof(node_t);
+    size_t cur_nodes = params_.GetSectorSize() / sizeof(node_t);
     size_t tree_d_file_size = ((2 * cur_nodes) - 1) * sizeof(node_t);
     mmap_t<node_t> tree_d;
     tree_d.mmap_write(tree_d_filename, tree_d_file_size);
 
-    node_t cc[params_->GetNumTreeDLevels() + 1] = {0};
+    node_t cc[params_.GetNumTreeDLevels() + 1] = {0};
     node_t buf[2] = {0};
 
-    for (size_t i = 1; i <= params_->GetNumTreeDLevels(); ++i) {
+    for (size_t i = 1; i <= params_.GetNumTreeDLevels(); ++i) {
       HashNode(&(cc[i]), &(buf[0]));
       std::memcpy(&(buf[0]), &(cc[i]), sizeof(node_t));
       std::memcpy(&(buf[1]), &(cc[i]), sizeof(node_t));
@@ -75,13 +76,13 @@ class TreeD {
       cur_level++;
     }
 
-    std::memcpy(comm_d, &(cc[params_->GetNumTreeDLevels()]), sizeof(node_t));
+    std::memcpy(comm_d, &(cc[params_.GetNumTreeDLevels()]), sizeof(node_t));
   }
 
   void BuildTree(node_t* comm_d,
                  std::string tree_d_filename,
                  std::string data_filename) {
-    size_t arity = params_->GetNumTreeDArity();
+    size_t arity = params_.GetNumTreeDArity();
     size_t arity_lg = (size_t) log2(arity);
 
     // Open Data File
@@ -89,11 +90,11 @@ class TreeD {
     data.mmap_read(data_filename);
 
     // Open tree d
-    size_t cur_nodes = params_->GetSectorSize() / sizeof(node_t);
+    size_t cur_nodes = params_.GetSectorSize() / sizeof(node_t);
     size_t tree_d_file_size = (cur_nodes - 1) * sizeof(node_t);
 
     if (copy_) {
-      tree_d_file_size += params_->GetSectorSize();
+      tree_d_file_size += params_.GetSectorSize();
     }
     mmap_t<node_t> tree_d;
     tree_d.mmap_write(tree_d_filename, tree_d_file_size);
@@ -104,7 +105,7 @@ class TreeD {
     // Copy all the data file data into tree_d if asked to
     // Adjust pointers
     if (copy_) {
-      std::memcpy(&tree_d[0], &data[0], params_->GetSectorSize());
+      std::memcpy(&tree_d[0], &data[0], params_.GetSectorSize());
       tree_ptr = &tree_d[0] + cur_nodes;
       in_ptr   = &tree_d[0];
     }
@@ -123,6 +124,6 @@ class TreeD {
   }
 
  private:
-  SectorParameters* params_;
+  P params_;
   bool              copy_;
 };

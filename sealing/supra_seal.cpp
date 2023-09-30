@@ -35,33 +35,35 @@
 #include "../pc1/pc1.hpp"
 #include "../pc2/pc2.hpp"
 #include "../util/util.hpp"
+#include "../util/sector_util.cpp"
 
 #include "../util/debug_helpers.cpp"
 
 // Simplify calling the various functions for different
 // sector configurations
+#define COMMA ,
 #define SECTOR_CALL_TABLE(FUNC) \
   switch (num_sectors) {        \
   case 128:                     \
-    FUNC(sealing_config128_t);  \
+    FUNC(sealing_config_t<128 COMMA decltype(params)>);  \
     break;                      \
   case 64:                      \
-    FUNC(sealing_config64_t);   \
+    FUNC(sealing_config_t<64 COMMA decltype(params)>);   \
     break;                      \
   case 32:                      \
-    FUNC(sealing_config32_t);   \
+    FUNC(sealing_config_t<32 COMMA decltype(params)>); \
     break;                      \
   case 16:                      \
-    FUNC(sealing_config16_t);   \
+    FUNC(sealing_config_t<16 COMMA decltype(params)>); \
     break;                      \
   case 8:                       \
-    FUNC(sealing_config8_t);    \
+    FUNC(sealing_config_t<8 COMMA decltype(params)>);  \
     break;                      \
   case 4:                       \
-    FUNC(sealing_config4_t);    \
+    FUNC(sealing_config_t<4 COMMA decltype(params)>);  \
     break;                      \
   case 2:                       \
-    FUNC(sealing_config2_t);    \
+    FUNC(sealing_config_t<2 COMMA decltype(params)>);  \
     break;                      \
   }
 
@@ -70,10 +72,12 @@ public:
   nvme_controllers_t* controllers;
   topology_t* topology;
 
-  sealing_ctx_t(const char* filename) {
-    init(filename);
+  template<class P>
+  sealing_ctx_t(P& params, const char* filename) {
+    init<P>(filename);
   }
 
+  template<class P>
   void init(const char* filename) {
     printf("Initializing spdk using config %s\n", filename);
 
@@ -98,8 +102,8 @@ public:
              " was run and drive list is up-to-date in .cfg\n");
       exit(1);
     }
-
-    print_parameters();
+    
+    print_parameters<P>();
     //print_temps();
   }
 
@@ -117,64 +121,63 @@ public:
 static sealing_ctx_t* sealing_ctx = nullptr;
 
 static std::mutex ctx_mtx;
-static void init_ctx() {
+
+static void init_ctx(size_t sector_size) {
   std::unique_lock<std::mutex> lck(ctx_mtx);
   if (sealing_ctx == nullptr) {
-    sealing_ctx = new sealing_ctx_t("supra_seal.cfg");
+    SECTOR_PARAMS_TABLE(sealing_ctx = new sealing_ctx_t(params, "supra_seal.cfg"));
   }
 }
 
 extern "C"
-void supra_seal_init(const char* config_file) {
+void supra_seal_init(size_t sector_size, const char* config_file) {
   printf("INIT called %s\n", config_file);
   std::unique_lock<std::mutex> lck(ctx_mtx);
   if (sealing_ctx == nullptr) {
-    sealing_ctx = new sealing_ctx_t(config_file);
+    SECTOR_PARAMS_TABLE(sealing_ctx = new sealing_ctx_t(params, config_file));
   }
 }
 
 extern "C"
 int pc1(uint64_t block_offset, size_t num_sectors,
-        const uint8_t* replica_ids, const char* parents_filename) {
-  init_ctx();
-
-#define CALL_PC1(C)                                     \
-  do_pc1<C>(sealing_ctx->controllers,                   \
-            *sealing_ctx->topology,                     \
-            block_offset,                               \
-            (const uint32_t*)replica_ids,               \
-            parents_filename);
-  SECTOR_CALL_TABLE(CALL_PC1);
+        const uint8_t* replica_ids, const char* parents_filename,
+        size_t sector_size) {
+  init_ctx(sector_size);
+#ifndef __CUDA_ARCH__
+#define CALL_PC1(C)                                                     \
+  do_pc1<C>(sealing_ctx->controllers,                 \
+                              *sealing_ctx->topology,                   \
+                              block_offset,                             \
+                              (const uint32_t*)replica_ids,             \
+                              parents_filename);
+  SECTOR_PARAMS_TABLE(SECTOR_CALL_TABLE(CALL_PC1));
 #undef CALL_PC1
+#endif
   return 0;
 }
 
 extern "C"
-int pc2_cleanup(size_t num_sectors, const char* output_dir) {
-  SectorParameters params(SECTOR_SIZE);
-
+int pc2_cleanup(size_t num_sectors, const char* output_dir,
+                size_t sector_size) {
 #define CALL_PC2_CLEANUP(C)                     \
-  do_pc2_cleanup<C>(params, output_dir);
+  do_pc2_cleanup<C>(output_dir);
 
-  SECTOR_CALL_TABLE(CALL_PC2_CLEANUP);
+  SECTOR_PARAMS_TABLE(SECTOR_CALL_TABLE(CALL_PC2_CLEANUP));
 #undef CALL_PC2_CLEANUP
-
   return 0;
 }
 
 extern "C"
-int pc2(size_t block_offset, size_t num_sectors,
-        const char* output_dir, const char** data_filenames) {
-  init_ctx();
-
-  SectorParameters params(SECTOR_SIZE);
+int pc2(size_t block_offset, size_t num_sectors, const char* output_dir,
+        const char** data_filenames, size_t sector_size) {
+  init_ctx(sector_size);
 
 #define CALL_PC2(C)                                   \
-  do_pc2<C>(params, *sealing_ctx->topology,           \
+  do_pc2<C>(*sealing_ctx->topology, \
             *sealing_ctx->controllers,                \
             block_offset,                             \
             data_filenames, output_dir);
-    SECTOR_CALL_TABLE(CALL_PC2);
+  SECTOR_PARAMS_TABLE(SECTOR_CALL_TABLE(CALL_PC2));
 #undef CALL_PC2
   return 0;
 }
@@ -183,20 +186,20 @@ extern "C"
 int c1(size_t block_offset, size_t num_sectors, size_t sector_slot,
        const uint8_t* replica_id, const uint8_t* seed,
        const uint8_t* ticket, const char* cache_path,
-       const char* parents_filename, const char* replica_path) {
+       const char* parents_filename, const char* replica_path,
+       size_t sector_size) {
   size_t qpair = sealing_ctx->topology->c1_qpair;
   int node_reader_core = sealing_ctx->topology->c1_reader;
-  SectorParameters params(SECTOR_SIZE);
   const char* output_dir = cache_path;
 
-  init_ctx();
+  init_ctx(sector_size);
 
 #define CALL_C1(C) \
   { \
     streaming_node_reader_t<C> reader(sealing_ctx->controllers, qpair, \
                                       block_offset, node_reader_core,   \
                                       sealing_ctx->topology->c1_sleep_time); \
-    return do_c1<C>(params, reader,                                    \
+    return do_c1<C>(reader,                                             \
                     num_sectors, sector_slot,                          \
                     replica_id, seed,                                  \
                     ticket, cache_path,                                \
@@ -204,18 +207,18 @@ int c1(size_t block_offset, size_t num_sectors, size_t sector_slot,
                     output_dir);                                       \
   }
 
-  SECTOR_CALL_TABLE(CALL_C1);
+  SECTOR_PARAMS_TABLE(SECTOR_CALL_TABLE(CALL_C1));
 #undef CALL_C1
 
   return 0;
 }
 
 template<class C>
-int do_node_read(uint64_t node_to_read) {
+int do_node_read(size_t sector_size, uint64_t node_to_read) {
   // Read and print a hashed node
   size_t pages_to_read = 1;
 
-  init_ctx();
+  init_ctx(sector_size);
 
   page_t<C> *pages = (page_t<C> *)
     spdk_dma_zmalloc(sizeof(page_t<C>) * pages_to_read, PAGE_SIZE, NULL);
@@ -241,17 +244,18 @@ int do_node_read(uint64_t node_to_read) {
   return 0;
 }
 
-int node_read(size_t num_sectors, uint64_t node_to_read) {
+int node_read(size_t sector_size, size_t num_sectors, uint64_t node_to_read) {
 #define CALL_NR(C)                                   \
-  do_node_read<C>(node_to_read);
-  SECTOR_CALL_TABLE(CALL_NR);
+  do_node_read<C>(sector_size, node_to_read);
+  SECTOR_PARAMS_TABLE(SECTOR_CALL_TABLE(CALL_NR));
 #undef CALL_NR
   return 0;
 }
 
 extern "C"
-size_t get_max_block_offset() {
-  init_ctx();
+size_t get_max_block_offset(size_t sector_size) {
+  init_ctx(sector_size);
+
   if (sealing_ctx->controllers[0].size() == 0) {
     return 0;
   }
@@ -266,43 +270,25 @@ size_t get_max_block_offset() {
 }
 
 extern "C"
-size_t get_slot_size(size_t num_sectors) {
-  init_ctx();
+size_t get_slot_size(size_t num_sectors, size_t sector_size) {
+  size_t num_layers;
+  SECTOR_PARAMS_TABLE(num_layers = params.GetNumLayers());
 
-  size_t pages_per_layer = 0;
-  switch (num_sectors) {
-  case 128:
-    pages_per_layer = sealing_config128_t::PAGES_PER_LAYER;
-    break;
-  case 64:
-    pages_per_layer = sealing_config64_t::PAGES_PER_LAYER;
-    break;
-  case 32:
-    pages_per_layer = sealing_config32_t::PAGES_PER_LAYER;
-    break;
-  case 16:
-    pages_per_layer = sealing_config16_t::PAGES_PER_LAYER;
-    break;
-  case 8:
-    pages_per_layer = sealing_config8_t::PAGES_PER_LAYER;
-    break;
-  case 4:
-    pages_per_layer = sealing_config4_t::PAGES_PER_LAYER;
-    break;
-  case 2:
-    pages_per_layer = sealing_config2_t::PAGES_PER_LAYER;
-    break;
-  case 1:
-    pages_per_layer = sealing_config1_t::PAGES_PER_LAYER;
-    break;
-  default:
+  // Number of nodes stored per page (packed)
+  size_t nodes_per_page  = PAGE_SIZE / (num_sectors * NODE_SIZE);
+  // Number of pages per layer
+  size_t pages_per_layer = sector_size / NODE_SIZE / nodes_per_page;
+
+  // We want the number of sectors to be a power of two and 128 at maximum
+  if (!((num_sectors & (num_sectors - 1)) == 0 && num_sectors > 0 && num_sectors <= 128)) {
     printf("Unsupported number of sectors %ld\n", num_sectors);
     exit(1);
   }
+
   size_t num_controllers = sealing_ctx->controllers[0].size();
   size_t pages_per_layer_per_controller =
     ((pages_per_layer + num_controllers - 1) / num_controllers);
-  return pages_per_layer_per_controller * LAYER_COUNT;
+  return pages_per_layer_per_controller * num_layers;
 }
 
 node_t* p_aux_open_read(const char* cache) {
@@ -368,7 +354,8 @@ bool p_aux_write(int index, size_t nodes, uint8_t* value, const char* cache) {
   return true;
 }
 
-bool get_comm_from_tree(uint8_t* comm, const char* cache,
+template<size_t sector_size>
+bool get_comm_from_tree(SectorParameters<sector_size> &params, uint8_t* comm, const char* cache,
                         size_t num_files, const char* prefix) {
   uint8_t* bufs[num_files];
 
@@ -407,7 +394,6 @@ bool get_comm_from_tree(uint8_t* comm, const char* cache,
     std::memcpy(comm, comm_addr, sizeof(node_t));
   } else {
     // Since files > 1, assume poseidon tree
-    SectorParameters params(SECTOR_SIZE);
     size_t arity = params.GetNumTreeRCArity();
     node_t nodes[arity];
 
@@ -428,16 +414,17 @@ bool get_comm_from_tree(uint8_t* comm, const char* cache,
 }
 
 extern "C"
-bool get_comm_c_from_tree(uint8_t* comm_c, const char* cache_path) {
-  SectorParameters params(SECTOR_SIZE);
-  size_t num_files = params.GetNumTreeRCFiles();
-
-  if (num_files == 1) {
-    return get_comm_from_tree(comm_c, cache_path, num_files,
-                              "%s/sc-02-data-tree-c.dat");
-  }
-  return get_comm_from_tree(comm_c, cache_path, num_files,
-                            "%s/sc-02-data-tree-c-%ld.dat");
+bool get_comm_c_from_tree(uint8_t* comm_c, const char* cache_path,
+                          size_t sector_size) {
+  SECTOR_PARAMS_TABLE(if (params.GetNumTreeRCFiles() == 1) {                     \
+                        return get_comm_from_tree(params, comm_c, cache_path,    \
+                                                  params.GetNumTreeRCFiles(),    \
+                                                  "%s/sc-02-data-tree-c.dat");   \
+                      }                                                          \
+                      return get_comm_from_tree(params, comm_c, cache_path,      \
+                                                params.GetNumTreeRCFiles(),      \
+                                                "%s/sc-02-data-tree-c-%ld.dat"); \
+    );
 }
 
 extern "C"
@@ -457,16 +444,17 @@ bool set_comm_c(uint8_t* comm_c, const char* cache_path) {
 }
 
 extern "C"
-bool get_comm_r_last_from_tree(uint8_t* comm_r_last, const char* cache_path) {
-  SectorParameters params(SECTOR_SIZE);
-  size_t num_files = params.GetNumTreeRCFiles();
-
-  if (num_files == 1) {
-    return get_comm_from_tree(comm_r_last, cache_path, num_files,
-                              "%s/sc-02-data-tree-r-last.dat");
-  }
-  return get_comm_from_tree(comm_r_last, cache_path, num_files,
-                            "%s/sc-02-data-tree-r-last-%ld.dat");
+bool get_comm_r_last_from_tree(uint8_t* comm_r_last, const char* cache_path,
+                               size_t sector_size) {
+  SECTOR_PARAMS_TABLE(if (params.GetNumTreeRCFiles() == 1) {                          \
+                        return get_comm_from_tree(params, comm_r_last, cache_path,    \
+                                                  params.GetNumTreeRCFiles(),         \
+                                                  "%s/sc-02-data-tree-r-last.dat");   \
+                      }                                                               \
+                      return get_comm_from_tree(params, comm_r_last, cache_path,      \
+                                                params.GetNumTreeRCFiles(),           \
+                                                "%s/sc-02-data-tree-r-last-%ld.dat"); \
+    );
 }
 
 extern "C"
@@ -499,18 +487,18 @@ bool get_comm_r(uint8_t* comm_r, const char* cache_path) {
 }
 
 extern "C"
-bool get_comm_d(uint8_t* comm_d, const char* cache_path) {
-  return get_comm_from_tree(comm_d, cache_path, 1, "%s/sc-02-data-tree-d.dat");
+bool get_comm_d(uint8_t* comm_d, const char* cache_path, size_t sector_size) {
+  SECTOR_PARAMS_TABLE(return get_comm_from_tree(params, comm_d, cache_path, 1, "%s/sc-02-data-tree-d.dat"));
 }
 
 extern "C"
-bool get_cc_comm_d(uint8_t* comm_d) {
-  SectorParameters params(SECTOR_SIZE);
-
-  std::memcpy(comm_d, CC_TREE_D_NODE_VALUES[params.GetNumTreeDLevels()],
-              sizeof(node_t));
+bool get_cc_comm_d(uint8_t* comm_d, size_t sector_size) {
+  SECTOR_PARAMS_TABLE(std::memcpy(comm_d, CC_TREE_D_NODE_VALUES[params.GetNumTreeDLevels()], \
+                                  sizeof(node_t)));
 
   return true;
 }
 
+#undef SECTOR_PARAMS_TABLE
 #undef SECTOR_CALL_TABLE
+#undef COMMA

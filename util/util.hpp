@@ -8,7 +8,7 @@
 
 inline uint64_t get_tsc() {
   uint64_t count;
-  
+
   // Read Time-Stamp Counter, Opcode - 0x0F 0x31, EDX:EAX <- TSC
   __asm__ volatile("lfence;             \
                         .byte 15; .byte 49; \

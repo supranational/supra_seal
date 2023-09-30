@@ -50,13 +50,13 @@ struct batch_t {
 // Type to store pointers to parent pages
 //
 // **Handling of very recent nodes**
-// 
+//
 // The coordinator will create a local copy of parents for the hasher to
 // access. For parents that are far from the head it's fine to just copy
 // the data. For local parents the data might be exist at the time the
 // coordinator is setting up the local buffer so we still need to pass the
-// parent pointer to the hasher. 
-// 
+// parent pointer to the hasher.
+//
 // Storage core
 // - Sets up parent pointers as usual
 // - For nodes there are local do not record reference counts
@@ -65,7 +65,7 @@ struct batch_t {
 // - Copies data into local buffer for hashers to use
 // - For nodes that are local it does not copy the data. Instead it
 //   passes pointer to the hashers in a side struct
-// 
+//
 // Hashers
 // - Set up parent pointers into local buffer or from side struct
 
@@ -92,13 +92,11 @@ struct parent_ptr_sync_t {
 // node into a single id. In this way all nodes are unique and can be
 // added, subtracted, etc. This is useful for managing the cache across
 // layers.
+template<class C>
 class node_id_t {
   uint64_t _id;
 
 public:
-  static const size_t NODE_BITS = SECTOR_SIZE_LG - NODE_SIZE_LG;
-  static const size_t NODE_MASK = (1 << NODE_BITS) - 1;
-
   node_id_t() noexcept {
     _id = 0;
   }
@@ -106,17 +104,17 @@ public:
     _id = node;
   }
   node_id_t(uint32_t layer, uint32_t node) {
-    _id = ((uint64_t)layer << NODE_BITS) | node;
+    _id = ((uint64_t)layer << C::GetNodeBits()) | node;
   }
 
   uint64_t id() {
     return _id;
   }
   uint32_t node() {
-    return _id & NODE_MASK;
+    return _id & C::GetNodeMask();
   }
   uint32_t layer() {
-    return _id >> NODE_BITS;
+    return _id >> C::GetNodeBits();
   }
   bool operator<(const node_id_t x) const {
     return _id < x._id;
@@ -141,15 +139,15 @@ struct node_io_t {
     WRITE,
     NOP
   };
-  
+
   // Node to read/write
   uint64_t node;
   // Read or write
   type_e type;
-  
+
   // Used for callbacks to signal when data is valid
   ring_buffer_valid_t* valid;
-  
+
   // Used for SPDK calls
   nvme_io_tracker_t  tracker;
 };

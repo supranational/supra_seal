@@ -22,29 +22,29 @@ class streaming_node_reader_t {
   // Packed indicates nodes within a single layer will be contiguous
   bool packed;
   size_t num_slots;
-  size_t pages_per_slot; 
-  
+  size_t pages_per_slot;
+
 public:
   streaming_node_reader_t(nvme_controllers_t* _controllers, size_t qpair,
                           size_t block_offset, int core_num, size_t idle_sleep);
-  
+
   ~streaming_node_reader_t();
 
   bool data_is_big_endian() {
     return false;
   }
-  
+
   // Allocate resource to perform N reads, each of size slot_node_count. These
   // will be indexed by slot_id
   // packed - indicates whether allocation should assume packed or unpacked node reads
   void alloc_slots(size_t N, size_t slot_node_count, bool _packed);
 
   uint8_t* get_slot(size_t slot);
-  
+
   uint8_t* get_full_buffer(size_t &bytes);
 
   void free_slots();
-  
+
   ////////////////////////////////////////
   // Used for PC2
   ////////////////////////////////////////
@@ -56,7 +56,7 @@ public:
   ////////////////////////////////////////
   // Used for C1
   ////////////////////////////////////////
-  
+
   // Load a vector of node IDs into the local buffer
   // The nodes are a vector of layer, node_id pairs
   // Since the nodes may be non-consecutive each node will use
@@ -72,4 +72,3 @@ public:
 };
 
 #endif
-

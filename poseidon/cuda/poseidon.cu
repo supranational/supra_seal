@@ -20,14 +20,14 @@ struct kernel_params_t {
 
 // CUDA doesn't seem to like templatized kernel arguments so encapsulate
 // it in a struct.
-template<int ARITY>
+template<size_t ARITY>
 struct in_ptrs_d {
   fr_t* ptrs[ARITY];
 };
 
 #include "poseidon_kernels.cu"
 
-template<int ARITY_DT>
+template<size_t ARITY_DT>
 struct PoseidonInternal {
   static const size_t DOMAIN_TAG = 1;
   static const size_t ARITY = ARITY_DT - DOMAIN_TAG;
@@ -91,7 +91,7 @@ template struct PoseidonInternal<9>;
 template struct PoseidonInternal<3>;
 
 #ifndef __CUDA_ARCH__
-template<int ARITY_DT>
+template<size_t ARITY_DT>
 class PoseidonCuda : public Poseidon {
   static const size_t DOMAIN_TAG = 1;
   static const size_t ARITY = ARITY_DT - DOMAIN_TAG;

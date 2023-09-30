@@ -24,8 +24,8 @@ class coordinator_t {
   size_t start_sector;
 
   // Node range to hash
-  node_id_t node_start;
-  node_id_t node_stop;
+  node_id_t<C> node_start;
+  node_id_t<C> node_stop;
 
   queue_stat_t   num_available_nodes_stats;
   counter_stat_t hasher_data_not_ready_stats;
@@ -34,7 +34,7 @@ class coordinator_t {
   uint64_t cycles_other;
   uint64_t tsc_start_cycle;
 #endif
-  
+
   // Replica IDs per hashing thread
   struct per_thread_t {
     replica_id_buffer_t replica_id_buffer;
@@ -49,7 +49,7 @@ class coordinator_t {
   std::atomic<uint64_t> coord_next_valid; // Next node ID to hash
 
   // Local node buffer to store the data copied from the parent
-  // ponters. Each batch includes all 14 parents. 
+  // ponters. Each batch includes all 14 parents.
   struct coord_node_t {
     uint32_t sectors[MAX_HASHERS_PER_COORD * NODES_PER_HASHER][NODE_WORDS];
   };
@@ -73,26 +73,26 @@ class coordinator_t {
 
 public:
   coordinator_t(std::atomic<bool>&          _terminator,
-                system_buffers_t<C>&        _system,
+                system_buffers_t<C>&     _system,
                 size_t                      _id, // Coordinator number
                 size_t                      _start_sector,
                 topology_t::coordinator_t   topology,
-                node_id_t                   _node_start,
-                node_id_t                   _node_stop,
+                node_id_t<C>                _node_start,
+                node_id_t<C>                _node_stop,
                 replica_id_buffer_t*        replica_id_buffers // One per sector
                 ) :
     terminator(_terminator),
     system(_system),
-    coord_next_valid(_node_start)    
+    coord_next_valid(_node_start)
   {
     id = _id;
     start_sector = _start_sector;
     node_start = _node_start;
     node_stop = _node_stop;
-    
+
     // printf("Constructing coordinator %ld, sector %ld, num_hashers %ld\n",
     //        id, start_sector, topology.num_hashers);
-           
+
     thr_data.resize(topology.num_hashers);
     for (size_t i = 0; i < topology.num_hashers; i++) {
       thr_data[i].replica_id_buffer  = replica_id_buffers[i];
@@ -118,12 +118,12 @@ public:
       coord_ready_mtx[i].lock();
     }
 #endif
-    
+
     // Set up hashing threads.
     num_threads = topology.num_hashers;
     // printf("Coord %ld start_sector %ld sectors %ld num_threads %ld\n",
     //        id, start_sector, topology.num_sectors(), num_threads);
-    
+
     pool = new thread_pool_t(num_threads);
     size_t sector = start_sector;
     for (size_t i = 0; i < num_threads; i++) {
@@ -161,7 +161,7 @@ public:
   }
 
   // Hash one node
-  void hash(node_id_t node, coord_node_t* parent_nodes,
+  void hash(node_id_t<C> node, coord_node_t* parent_nodes,
             parallel_node_t<C>** local_ptrs, parallel_node_t<C>* hash_out,
             size_t offset_id, size_t thread_id, per_thread_t* replicaId
 #ifdef VERIFY_HASH_RESULT
@@ -185,7 +185,7 @@ public:
         ptr_batch.batch[i].ptr = (parallel_node_t<C>*)&parent_nodes[i].sectors[thread_id * NODES_PER_HASHER];
       }
     }
-    
+
     parallel_node_t<C>** cur_parent_ptr  = &ptr_batch.batch[0].ptr;
     uint32_t**  cur_data_buf;
     size_t      blocks;
@@ -233,7 +233,7 @@ public:
     cycles_other += (tsc - tsc_start_cycle);
     tsc_start_cycle = tsc;
 #endif
-    
+
     // Hash the node
     sha_ext_mbx2(&hash_out->sectors[offset_id].limbs[0],
                  &(replicaId->replica_id_ptrs[0]), cur_data_buf,
@@ -246,7 +246,7 @@ public:
 #endif
 
     // // Periodically print the hash result
-    // if (offset_id == 0 && thread_id == 0 && 
+    // if (offset_id == 0 && thread_id == 0 &&
     //     (node.node() & ((NODE_COUNT / 4) - 1)) == 0) {
     //   unique_lock<mutex> lck(print_mtx);
     //   printf("H %3ld T %3ld node %08lx hasher out %p: ",
@@ -259,7 +259,7 @@ public:
         (htonl(hash_out->sectors[offset_id][0]) != sealed_data[node.node() * NODE_WORDS] ||
          htonl(hash_out->sectors[offset_id + 1][0]) != sealed_data[node.node() * NODE_WORDS])) {
       unique_lock<mutex> lck(print_mtx);
-      
+
       printf("\nMISMATCH: Hasher %ld thr %ld Node %x layer %d id %lx thr_offset_id %ld hash_out->sectors %p %p\n",
              id, thread_id, node.node(), node.layer() + 1, node.id(),
              offset_id,
@@ -268,7 +268,7 @@ public:
       print_digest_reorder(hash_out->sectors[offset_id + 1]);
       printf("Expected:\n");
       print_digest_reorder(&sealed_data[node.node() * NODE_WORDS]);
-      
+
       printf("blocks %ld, repeat %ld\n", blocks, repeat);
       for (size_t j = 0; j < PARENT_PTR_BATCH_SIZE; j++) {
         //printf("Printing parent %ld\n", j);
@@ -285,7 +285,7 @@ public:
           print_digest_reorder(ptr_batch.batch[j].ptr->sectors[0]);
           printf("%s %p: ", prefix, ptr_batch.batch[j].ptr->sectors[1]);
           print_digest_reorder(ptr_batch.batch[j].ptr->sectors[1]);
-          
+
         }
         //printf("Received data for buf %d\n", io->buf_id);
       }
@@ -293,7 +293,7 @@ public:
              offset_id, thread_id, node.id(), hash_out->sectors[offset_id]);
       print_digest_reorder(hash_out->sectors[offset_id]);
 
-      
+
       sleep(5);
       abort();
     }
@@ -305,7 +305,7 @@ public:
   //   sector    - sector to hash
   __attribute__ ((noinline)) void run_thread(size_t thr_count, size_t sector) {
     // Absolute node count
-    node_id_t thr_node = node_start;
+    node_id_t<C> thr_node = node_start;
     // Index into local coordinator ring buffer
     size_t coord_idx = 0;
     // Index into node buffer
@@ -341,7 +341,7 @@ public:
     //   print_digest(&(replicaId->replica_id_buffer.padding[0][0]));
     //   printf("\n");
     // }
-    
+
     while (thr_node < node_stop) {
       // Wait for the next node to be ready
       uint64_t valid_nodes;
@@ -353,12 +353,12 @@ public:
         coord_ready_mtx[coord_idx].lock();
         coord_ready_mtx[coord_idx].unlock();
 #endif
-        
+
         while ((valid_nodes = coord_next_valid.load(DEFAULT_MEMORY_ORDER)) <= thr_node.id()) {}
       }
 
       // Clear counters after startup
-      if (valid_nodes > (node_start + NODE_COUNT / 128) && !data_reset) {
+      if (valid_nodes > (node_start + C::GetNumNodes() / 128) && !data_reset) {
         data_not_ready = 0;
 #ifdef HASHER_TSC
         cycles_other = 0;
@@ -366,15 +366,15 @@ public:
 #endif
         data_reset = true;
       }
-          
+
       while (thr_node.id() < valid_nodes) {
         coord_node_t* parent_batch = coord_ring.get_entry(coord_idx)->parents;
         parallel_node_t<C>** local_ptr_batch = coord_ring_ptrs[coord_idx];
-        
+
 #ifdef VERIFY_HASH_RESULT
         if (thr_node.node() == 0) {
           if (sealed_data_fd != 0) {
-            munmap(sealed_data, SECTOR_SIZE);
+            munmap(sealed_data, C::GetSectorSize());
             close(sealed_data_fd);
           }
           char sealed_file_name[256];
@@ -382,8 +382,8 @@ public:
           sprintf(sealed_file_name, sealed_file_template, cur_layer);
           sealed_data_fd = open(sealed_file_name, O_RDONLY);
           assert (sealed_data_fd != -1);
-          sealed_data = (uint32_t*)mmap(NULL, SECTOR_SIZE, PROT_READ, MAP_PRIVATE,
-                                        sealed_data_fd, 0);
+          sealed_data = (uint32_t*)mmap(NULL, C::GetSectorSize(), PROT_READ,
+                                        MAP_PRIVATE, sealed_data_fd, 0);
           if (sealed_data == MAP_FAILED) {
             perror("mmap");
             exit(1);
@@ -391,14 +391,14 @@ public:
           assert (sealed_data != MAP_FAILED);
         }
 #endif
-        
+
         for (size_t i = 0; i < COORD_BATCH_SIZE; i++) {
           size_t node_in_page = thr_node.node() % C::NODES_PER_PAGE;
           coord_node_t* parent_nodes = &parent_batch[i * PARENT_COUNT];
           parallel_node_t<C>* hash_out = &system.node_buffer.get_entry(node_idx)->
             batch[0].parallel_nodes[node_in_page];
           hash(thr_node, parent_nodes,
-               &local_ptr_batch[i * PARENT_COUNT], 
+               &local_ptr_batch[i * PARENT_COUNT],
                hash_out, offset_id, thr_count, replicaId
 #ifdef VERIFY_HASH_RESULT
                , sealed_data
@@ -410,7 +410,7 @@ public:
             node_idx = system.node_buffer.incr(node_idx);
           }
         }
-        
+
         // Indicate that we're done
         coord_done_count[coord_idx].fetch_add(1, DEFAULT_MEMORY_ORDER);
         coord_idx = coord_ring.incr(coord_idx);
@@ -428,9 +428,9 @@ public:
   // Perform the coordinator functions
   int run() {
     // Absolute node count
-    node_id_t node(node_start);
+    node_id_t<C> node(node_start);
     // Completed node count
-    node_id_t completed_node(node_start);
+    node_id_t<C> completed_node(node_start);
 
     // Index into parent_buffer
     size_t idx = 0;
@@ -444,9 +444,9 @@ public:
     size_t node_update_batch_count = 0;
 
     size_t data_not_ready = 0;
-    
+
     //printf("Starting coord %ld thread %d offset_id %ld\n", id, 0, offset_id);
-    
+
     timestamp_t layer_start = std::chrono::high_resolution_clock::now();
 
 #ifdef PRINT_STALLS
@@ -459,7 +459,7 @@ public:
     size_t coord_batch_idx = 0;
     coord_batch_t* current_batch = coord_ring.reserve(coord_batch_idx);
     parallel_node_t<C>** coord_ring_ptrs_batch = coord_ring_ptrs[coord_batch_idx];
-    
+
     while(node < node_stop) {
       bool advanced = false;
       bool done = false;
@@ -485,7 +485,7 @@ public:
         cur_valid = system.parent_buffer.is_valid(next_idx);
         size_t next_node_idx = system.node_buffer.incr(node_idx);
         done = node.id() + 1 == node_stop.id();
-        
+
         if (node.node() == 0 && node.layer() > 0) {
           if (id == 0) {
             timestamp_t stop = std::chrono::high_resolution_clock::now();
@@ -502,7 +502,7 @@ public:
         for (size_t j = 0; j < PARENT_COUNT; j++) {
           coord_node_t* dst = &current_batch->parents[coord_batch_count * PARENT_COUNT + j];
           parallel_node_t<C>* src = ptr_batch->batch[j].ptr;
-          
+
           if (src == nullptr) {
             // Do nothing
             coord_ring_ptrs_batch[coord_batch_count * PARENT_COUNT + j] = nullptr;
@@ -514,7 +514,7 @@ public:
             coord_ring_ptrs_batch[coord_batch_count * PARENT_COUNT + j] = nullptr;
           }
         }
-        
+
     //     // Print the input data
         // if (id == 1 && node.id() == 0x115f9a05) {
         //   unique_lock<mutex> lck(print_mtx);
@@ -545,7 +545,7 @@ public:
         if (coord_batch_count == COORD_BATCH_SIZE) {
 #ifdef MUTEX_THREAD_SYNC
           coord_ready_mtx[coord_batch_idx].unlock();
-#endif          
+#endif
           coord_next_valid += COORD_BATCH_SIZE;
           // Recover a buffer if needed
           while (coord_ring.is_full()) {
@@ -562,7 +562,7 @@ public:
           current_batch = coord_ring.reserve(coord_batch_idx);
           assert (current_batch != nullptr);
           coord_ring_ptrs_batch = coord_ring_ptrs[coord_batch_idx];
-          
+
           coord_batch_count = 0;
           node_update_batch_count++;
         }
@@ -615,7 +615,7 @@ public:
         std::chrono::seconds>(stop - layer_start).count();
       printf("Layer took %ld seconds\n", secs);
     }
-    
+
     return 0;
   }
 };

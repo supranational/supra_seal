@@ -8,13 +8,14 @@
 #include "tree_d.hpp"
 #include "../sealing/constants.hpp"
 #include "../sealing/sector_parameters.hpp"
+#include "../util/sector_util.cpp"
 
-// g++ -g -Wall -Wextra -Werror -march=native -O3 -I../pc1 ../sealing/sector_parameters.cpp tree_d.cpp -L../../deps/blst -lblst
+// g++ -g -Wall -Wextra -Werror -DRUNTIME_SECTOR_SIZE -march=native -O3 -I../pc1 ../sealing/sector_parameters.cpp tree_d.cpp -L../deps/blst -lblst
 
 int main(int argc, char* argv[]) {
   int  opt   = 0;
   bool copy  = true;
-  std::string sector_size_str = "32GiB";
+  std::string sector_size_string = "";
 
   std::string tree_d_filename = "./sc-02-data-tree-d.dat";
   std::string data_filename   = "";
@@ -35,7 +36,7 @@ int main(int argc, char* argv[]) {
         break;
       case 's':
         std::cout << "sector_size input     " << optarg << std::endl;
-        sector_size_str = optarg;
+        sector_size_string = optarg;
         break;
       case 'h':
       case ':':
@@ -52,18 +53,29 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  SectorParameters params(sector_size_str);
-  TreeD tree_d(&params, copy);
+  if (sector_size_string.empty()) {
+    std::cout << "Please specify a sector size" << std::endl;
+    exit(1);
+  }
+
+  size_t sector_size = get_sector_size_from_string(sector_size_string);
 
   node_t comm_d;
 
   auto start = std::chrono::high_resolution_clock::now();
 
-  if (!data_filename.empty()) {
-    tree_d.BuildTree(&comm_d, tree_d_filename, data_filename);
-  } else {
-    tree_d.BuildCCTree(&comm_d, tree_d_filename);
-  }
+  SECTOR_PARAMS_TABLE(                                           \
+    TreeD<decltype(params)> tree_d(copy);                        \
+                                                                 \
+    if (!data_filename.empty()) {                                \
+      tree_d.BuildTree(&comm_d, tree_d_filename, data_filename); \
+    } else {                                                     \
+      tree_d.BuildCCTree(&comm_d, tree_d_filename);              \
+    }                                                            \
+                                                                 \
+    std::cout << std::endl << "comm_d ";                         \
+    tree_d.print_digest_hex(&comm_d);                            \
+  );
 
   auto cur = std::chrono::high_resolution_clock::now();
   auto duration =
@@ -71,8 +83,6 @@ int main(int argc, char* argv[]) {
   start = cur;
   std::cout << "Tree D generation took " << duration << "ms" << std::endl;
 
-  std::cout << std::endl << "comm_d ";
-  tree_d.print_digest_hex(&comm_d);
   return 0;
 }
 #endif

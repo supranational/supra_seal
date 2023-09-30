@@ -5,10 +5,13 @@
 set -e
 set -x
 
-SECTOR_SIZE="-DSECTOR_SIZE_32GiB"
-if [ "$1" == "512MiB" ]; then
-    SECTOR_SIZE="-DSECTOR_SIZE_512MiB"
-fi
+SECTOR_SIZE="" # Compile for all sector sizes
+while getopts r flag
+do
+    case "${flag}" in
+        r) SECTOR_SIZE="-DRUNTIME_SECTOR_SIZE";;
+    esac
+done
 
 CC=${CC:-cc}
 CXX=${CXX:-c++}
@@ -27,7 +30,7 @@ CXXFLAGS="$CFLAGS -march=native $CXXSTD \
           -fstack-protector -fno-common \
           -D_GNU_SOURCE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 \
           -DSPDK_GIT_COMMIT=4be6d3043 -pthread \
-          -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
+          -Wall -Wextra -Wno-unused-variable -Wno-unused-parameter -Wno-missing-field-initializers \
           -Wformat -Wformat-security"
 
 LDFLAGS="-fno-omit-frame-pointer -Wl,-z,relro,-z,now -Wl,-z,noexecstack -fuse-ld=bfd\
@@ -154,9 +157,7 @@ $NVCC $CFLAGS $CUDA_ARCH -std=c++17 -DNO_SPDK -Xcompiler -march=native \
       -Xcompiler -Wall,-Wextra,-Wno-subobject-linkage,-Wno-unused-parameter \
       -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -c pc2/cuda/pc2.cu -o obj/pc2.o &
 
-$CXX -g -O2 -c sealing/sector_parameters.cpp -o obj/sector_parameters.o
-
-$CXX $CXXFLAGS $INCLUDE -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
+$CXX $CXXFLAGS $INCLUDE -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
     -c sealing/supra_seal.cpp -o obj/supra_seal.o -Wno-subobject-linkage &
 
 wait
@@ -167,7 +168,6 @@ ar rvs obj/libsupraseal.a \
    obj/ring_t.o \
    obj/streaming_node_reader_nvme.o \
    obj/supra_seal.o \
-   obj/sector_parameters.o \
    obj/sha_ext_mbx2.o
 
 $CXX $CXXFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
@@ -176,9 +176,9 @@ $CXX $CXXFLAGS -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src \
     $LDFLAGS -Ldeps/blst -lblst -L$CUDA/lib64 -lcudart_static -lgmp -lconfig++ &
 
 # tree-r CPU only
-$CXX $CXXSTD -pthread -g -O3 -march=native \
+$CXX $SECTOR_SIZE $CXXSTD -pthread -g -O3 -march=native \
     -Wall -Wextra -Werror -Wno-subobject-linkage \
-    tools/tree_r.cpp \
+    tools/tree_r.cpp poseidon/poseidon.cpp \
     -o bin/tree_r_cpu -Iposeidon -Ideps/sppark -Ideps/blst/src -L deps/blst -lblst &
 
 # tree-r CPU + GPU
@@ -206,4 +206,3 @@ $NVCC $SECTOR_SIZE -DNO_SPDK -DSTREAMING_NODE_READER_FILES \
      -Iposeidon -Ideps/sppark -Ideps/sppark/util -Ideps/blst/src -L deps/blst -lblst -lconfig++ &
 
 wait
-

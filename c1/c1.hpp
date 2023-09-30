@@ -31,8 +31,7 @@
 template<class C>
 class C1 {
  public:
-  C1(SectorParameters* params, streaming_node_reader_t<C>& reader,
-     size_t sector_slot);
+  C1(streaming_node_reader_t<C>& reader, size_t sector_slot);
   ~C1();
 
   void SetReplicaID(const node_t* replica_id) { replica_id_ = replica_id; }
@@ -42,7 +41,7 @@ class C1 {
 
   void SetTreeRBufs(const char* tree_r_cache, const char* file_prefix,
                     bool include_slot = false) {
-    size_t num_files = params_->GetNumTreeRCFiles();
+    size_t num_files = C::GetNumTreeRCFiles();
     tree_r_bufs_.resize(num_files);
     SetTreeBufs(&tree_r_bufs_[0], tree_r_cache,
                 file_prefix, num_files, include_slot);
@@ -50,7 +49,7 @@ class C1 {
 
   void SetTreeCBufs(const char* tree_c_cache, const char* file_prefix,
                     bool include_slot = false) {
-    size_t num_files = params_->GetNumTreeRCFiles();
+    size_t num_files = C::GetNumTreeRCFiles();
     tree_c_bufs_.resize(num_files);
     SetTreeBufs(&tree_c_bufs_[0], tree_c_cache,
                 file_prefix, num_files, include_slot);
@@ -62,7 +61,10 @@ class C1 {
                 file_prefix, 1, include_slot);
     if (tree_d_buf_.is_open() == 0) {
       printf("No tree d file, assuming CC sector\n");
-      comm_d_ = (node_t*) CC_TREE_D_NODE_VALUES[params_->GetNumTreeDLevels()];
+      // TODO: for 64GB would need to access the next layer. CC_TREE_D_NODE_VALUES
+      // would need to be filled in.
+      assert (C::GetNumTreeDLevels() <= 31);
+      comm_d_ = (node_t*) CC_TREE_D_NODE_VALUES[C::GetNumTreeDLevels()];
     } else {
       uint8_t* comm_d_addr = (uint8_t*)&tree_d_buf_[0] +
                               (tree_d_buf_.get_size() - sizeof(node_t));
@@ -86,7 +88,6 @@ class C1 {
   void SetTreeBufs(mmap_t<node_t>* bufs, const char* cache,
                    const char* prefix, size_t num_files, bool include_slot);
 
-  SectorParameters*           params_;
   streaming_node_reader_t<C>& reader_;
   size_t                      sector_slot_;
   const node_t*               replica_id_;
@@ -106,11 +107,10 @@ class C1 {
 };
 
 template<class C>
-C1<C>::C1(SectorParameters* params, streaming_node_reader_t<C>& reader,
-          size_t sector_slot) :
-  params_(params), reader_(reader), sector_slot_(sector_slot) {
+C1<C>::C1(streaming_node_reader_t<C>& reader, size_t sector_slot) :
+  reader_(reader), sector_slot_(sector_slot) {
 
-  challenges_count_ = params->GetNumChallenges() / params->GetNumPartitions();
+  challenges_count_ = C::GetNumChallenges() / C::GetNumPartitions();
 
   challenges_  = nullptr;
 }
@@ -126,10 +126,10 @@ void C1<C>::DeriveChallenges(const uint8_t* seed) {
   seed_   = (node_t*) seed;
 
   uint32_t hash[8] __attribute__ ((aligned (32)));
-  size_t leaves = params_->GetNumLeaves();
-  challenges_   = new uint64_t[params_->GetNumChallenges()];
+  size_t leaves = C::GetNumLeaves();
+  challenges_   = new uint64_t[C::GetNumChallenges()];
 
-  for (uint8_t k = 0; k < params_->GetNumPartitions(); ++k) {
+  for (uint8_t k = 0; k < C::GetNumPartitions(); ++k) {
     uint8_t buf[128] __attribute__ ((aligned (32))) = {0};
     std::memcpy(buf, replica_id_, 32);
     std::memcpy(buf + 32, seed, 32);
@@ -225,22 +225,22 @@ void C1<C>::GetRoots(const char* cache) {
 
 template<class C>
 size_t C1<C>::ProofSize(bool do_tree, bool do_node) {
-  uint64_t num_partitions = params_->GetNumPartitions();
-  uint64_t num_challenges = params_->GetNumChallenges();
+  uint64_t num_partitions = C::GetNumPartitions();
+  uint64_t num_challenges = C::GetNumChallenges();
 
-  size_t tree_d_proof_size =  TreeProof::ProofSize(params_->GetNumTreeDArity(),
-    params_->GetNumTreeDLevels(), SINGLE_PROOF_DATA);
-  size_t tree_rc_proof_size = TreeProof::ProofSize(params_->GetNumTreeRCArity(),
-    params_->GetNumTreeRCLevels(), params_->GetNumTreeRCConfig());
+  size_t tree_d_proof_size =  TreeProof::ProofSize(C::GetNumTreeDArity(),
+    C::GetNumTreeDLevels(), SINGLE_PROOF_DATA);
+  size_t tree_rc_proof_size = TreeProof::ProofSize(C::GetNumTreeRCArity(),
+    C::GetNumTreeRCLevels(), C::GetNumTreeRCConfig());
   size_t tree_proof_size = tree_d_proof_size + tree_rc_proof_size;
 
-  size_t label_proof_size =  LabelProof::ProofSize(params_->GetNumLayers(),
+  size_t label_proof_size =  LabelProof::ProofSize(C::GetNumLayers(),
                                                    false);
-  size_t enc_proof_size =  LabelProof::ProofSize(params_->GetNumLayers(),
+  size_t enc_proof_size =  LabelProof::ProofSize(C::GetNumLayers(),
                                                  true);
   size_t col_proof_size = ((1 + PARENT_COUNT_BASE + PARENT_COUNT_EXP) *
-                           ColumnProof::ProofSize(params_)) +
-                          (2 * sizeof(uint64_t));
+                           ColumnProof<C>::ProofSize()) +
+                           (2 * sizeof(uint64_t));
 
   size_t node_proof_size = label_proof_size + enc_proof_size + col_proof_size;
 
@@ -265,19 +265,19 @@ void C1<C>::WriteProofs(const char* filename, bool do_tree, bool do_node) {
   mmap_t<uint8_t> file_ptr;
   size_t expected_file_size = ProofSize(do_tree, do_node);
   file_ptr.mmap_write(filename, expected_file_size);
-  
+
   size_t buf_index = 0;
 
   // Need to put together  pub vanilla_proofs: Vec<Vec<VanillaSealProof<Tree>>>,
-  uint64_t vp_outer_length = params_->GetNumPartitions();
+  uint64_t vp_outer_length = C::GetNumPartitions();
   uint64_t vp_inner_length = challenges_count_;
 
   std::memcpy(&file_ptr[0] + buf_index, &vp_outer_length, sizeof(uint64_t));
   buf_index += sizeof(uint64_t);
-  
+
   // Gather the output buffers into a contiguous array to keep challenge agnostic
   // about file IO
-  size_t num_files = params_->GetNumTreeRCFiles();
+  size_t num_files = C::GetNumTreeRCFiles();
   std::vector<node_t*> tree_r(num_files);
   std::vector<node_t*> tree_c(num_files);
   for (size_t i = 0; i < num_files; i++) {
@@ -292,9 +292,9 @@ void C1<C>::WriteProofs(const char* filename, bool do_tree, bool do_node) {
 
     for (uint64_t j = 0; j < vp_inner_length; ++j) {
       C1Challenge<C> challenge(challenges_[j + (i * challenges_count_)],
-                               params_, &tree_r_root_, &tree_c_root_, comm_d_);
+                                  &tree_r_root_, &tree_c_root_, comm_d_);
 
-      
+
       if (do_node == true) {
         challenge.GetParents(&parents_buf_[0]);
         challenge.GetNodes(reader_, sector_slot_);
@@ -344,13 +344,13 @@ void C1<C>::WriteProofs(const char* filename, bool do_tree, bool do_node) {
 
 template<class C>
 void C1<C>::CombineProofs(const char* filename,
-                          const char* tree_filename,
-                          const char* node_filename) {
+                             const char* tree_filename,
+                             const char* node_filename) {
   remove(filename);
   mmap_t<uint8_t> file_ptr;
   size_t expected_file_size = ProofSize(true, true);
   file_ptr.mmap_write(filename, expected_file_size);
-  
+
   mmap_t<uint8_t> tree_ptr;
   size_t exp_tree_buf_size = ProofSize(true, false);
   tree_ptr.mmap_write(tree_filename, exp_tree_buf_size);
@@ -362,23 +362,23 @@ void C1<C>::CombineProofs(const char* filename,
   size_t tree_buf_index = 0;
   size_t node_buf_index = 0;
 
-  size_t tree_d_proof_size =  TreeProof::ProofSize(params_->GetNumTreeDArity(),
-    params_->GetNumTreeDLevels(), SINGLE_PROOF_DATA);
-  size_t tree_rc_proof_size = TreeProof::ProofSize(params_->GetNumTreeRCArity(),
-    params_->GetNumTreeRCLevels(), params_->GetNumTreeRCConfig());
+  size_t tree_d_proof_size =  TreeProof::ProofSize(C::GetNumTreeDArity(),
+    C::GetNumTreeDLevels(), SINGLE_PROOF_DATA);
+  size_t tree_rc_proof_size = TreeProof::ProofSize(C::GetNumTreeRCArity(),
+    C::GetNumTreeRCLevels(), C::GetNumTreeRCConfig());
   size_t tree_proof_size = tree_d_proof_size + tree_rc_proof_size;
 
-  size_t label_proof_size =  LabelProof::ProofSize(params_->GetNumLayers(),
+  size_t label_proof_size =  LabelProof::ProofSize(C::GetNumLayers(),
                                                    false);
-  size_t enc_proof_size =  LabelProof::ProofSize(params_->GetNumLayers(),
+  size_t enc_proof_size =  LabelProof::ProofSize(C::GetNumLayers(),
                                                  true);
   size_t col_proof_size = ((1 + PARENT_COUNT_BASE + PARENT_COUNT_EXP) *
-                           ColumnProof::ProofSize(params_)) +
-                          (2 * sizeof(uint64_t));
+                           ColumnProof<C>::ProofSize()) +
+                           (2 * sizeof(uint64_t));
   size_t node_proof_size = label_proof_size + enc_proof_size + col_proof_size;
 
   // Need to put together  pub vanilla_proofs: Vec<Vec<VanillaSealProof<Tree>>>,
-  uint64_t vp_outer_length = params_->GetNumPartitions();
+  uint64_t vp_outer_length = C::GetNumPartitions();
   uint64_t vp_inner_length = challenges_count_;
 
   std::memcpy(&file_ptr[0] + buf_index, &vp_outer_length, sizeof(uint64_t));
@@ -435,18 +435,18 @@ void C1<C>::CombineProofs(const char* filename,
 
 
 template<class C>
-int do_c1(SectorParameters& params, streaming_node_reader_t<C>& reader,
+int do_c1(streaming_node_reader_t<C>& reader,
           size_t num_sectors, size_t sector_slot,
           const uint8_t* replica_id, const uint8_t* seed,
           const uint8_t* ticket, const char* cache_path,
           const char* parents_filename, const char* replica_path,
           const char* output_dir) {
-  C1<C> c1(&params, reader, sector_slot);
+  C1<C> c1(reader, sector_slot);
   c1.SetReplicaID((node_t*)replica_id);
   c1.SetTicket((node_t*)ticket);
 
   c1.DeriveChallenges(seed);
-  if (params.GetNumTreeRCFiles() == 1) {
+  if (C::GetNumTreeRCFiles() == 1) {
     c1.SetTreeRBufs(cache_path, "%s/sc-02-data-tree-r-last.dat");
     c1.SetTreeCBufs(cache_path, "%s/sc-02-data-tree-c.dat");
   } else {
@@ -468,16 +468,16 @@ int do_c1(SectorParameters& params, streaming_node_reader_t<C>& reader,
 }
 
 template<class C>
-int do_c1_tree(SectorParameters& params, streaming_node_reader_t<C>& reader,
+int do_c1_tree(streaming_node_reader_t<C>& reader,
                size_t num_sectors, size_t sector_slot,
                const uint8_t* replica_id, const uint8_t* seed,
                const uint8_t* ticket, const char* cache_path,
                const char* parents_filename, const char* replica_path,
                const char* output_dir) {
-  C1<C> c1_tree(&params, reader, sector_slot);
+  C1<C> c1_tree(reader, sector_slot);
   c1_tree.SetReplicaID((node_t*)replica_id);
   c1_tree.DeriveChallenges(seed);
-  if (params.GetNumTreeRCFiles() == 1) {
+  if (C::GetNumTreeRCFiles() == 1) {
     c1_tree.SetTreeRBufs(cache_path, "%s/sc-02-data-tree-r-last.dat");
   } else {
     c1_tree.SetTreeRBufs(cache_path, "%s/sc-02-data-tree-r-last-%ld.dat");
@@ -495,17 +495,17 @@ int do_c1_tree(SectorParameters& params, streaming_node_reader_t<C>& reader,
 }
 
 template<class C>
-int do_c1_node(SectorParameters& params, streaming_node_reader_t<C>& reader,
+int do_c1_node(streaming_node_reader_t<C>& reader,
                size_t num_sectors, size_t sector_slot,
                const uint8_t* replica_id, const uint8_t* seed,
                const uint8_t* ticket, const char* cache_path,
                const char* parents_filename, const char* replica_path,
                const char* output_dir) {
-  C1<C> c1_node(&params, reader, sector_slot);
+  C1<C> c1_node(reader, sector_slot);
   c1_node.SetReplicaID((node_t*)replica_id);
   c1_node.SetTicket((node_t*)ticket);
   c1_node.DeriveChallenges(seed);
-  if (params.GetNumTreeRCFiles() == 1) {
+  if (C::GetNumTreeRCFiles() == 1) {
     c1_node.SetTreeCBufs(cache_path, "%s/sc-02-data-tree-c.dat");
   } else {
     c1_node.SetTreeCBufs(cache_path, "%s/sc-02-data-tree-c-%ld.dat");
@@ -522,13 +522,13 @@ int do_c1_node(SectorParameters& params, streaming_node_reader_t<C>& reader,
 }
 
 template<class C>
-int do_c1_comb(SectorParameters& params, streaming_node_reader_t<C>& reader,
+int do_c1_comb(streaming_node_reader_t<C>& reader,
                size_t num_sectors, size_t sector_slot,
                const uint8_t* replica_id, const uint8_t* seed,
                const uint8_t* ticket, const char* cache_path,
                const char* parents_filename, const char* replica_path,
                const char* output_dir) {
-  C1<C> c1_combine(&params, reader, sector_slot);
+  C1<C> c1_combine(reader, sector_slot);
 
   const size_t MAX = 256;
   char fname_tree[MAX];

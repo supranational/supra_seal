@@ -6,7 +6,7 @@
 template<class C>
 class C1Challenge {
  public:
-  C1Challenge(uint64_t challenge, SectorParameters* params,
+  C1Challenge(uint64_t challenge, 
               node_t* tree_r_root_, node_t* tree_c_root_, node_t* tree_d_root);
   ~C1Challenge();
 
@@ -23,7 +23,6 @@ class C1Challenge {
 
  private:
   uint64_t          challenge_;
-  SectorParameters* params_;
   uint32_t          drg_parents_[PARENT_COUNT_BASE];
   uint32_t          exp_parents_[PARENT_COUNT_EXP];
   node_t*           nodes_;        // This node and its parents for each layer
@@ -34,17 +33,16 @@ class C1Challenge {
 };
 
 template<class C>
-C1Challenge<C>::C1Challenge(uint64_t challenge, SectorParameters* params,
+C1Challenge<C>::C1Challenge(uint64_t challenge,
                             node_t* tree_r_root, node_t* tree_c_root,
                             node_t* tree_d_root) :
   challenge_(challenge),
-  params_(params),
   tree_r_root_(tree_r_root),
   tree_c_root_(tree_c_root),
   tree_d_root_(tree_d_root) {
 
-  nodes_        = new node_t[params->GetNumLayers() * (PARENT_COUNT + 1)];
-  tree_r_nodes_ = new node_t[params->GetNumTreeRLabels()];
+  nodes_        = new node_t[C::GetNumLayers() * (PARENT_COUNT + 1)];
+  tree_r_nodes_ = new node_t[C::GetNumTreeRLabels()];
 }
 
 template<class C>
@@ -71,7 +69,7 @@ void C1Challenge<C>::GetNodes(streaming_node_reader_t<C>& reader,
                               size_t sector_slot) {
   std::vector<std::pair<size_t, size_t>> nodes;
 
-  size_t layer_count = params_->GetNumLayers();
+  size_t layer_count = C::GetNumLayers();
   for (size_t l = 0; l < layer_count; ++l) {
     nodes.push_back(std::pair(l, challenge_));
 
@@ -96,8 +94,8 @@ void C1Challenge<C>::GetNodes(streaming_node_reader_t<C>& reader,
 
 template<class C>
 void C1Challenge<C>::GetTreeRNodes(node_t* replica_buf) {
-  size_t tree_r_label_idx  = challenge_ & params_->GetChallengeStartMask();
-  for (size_t k = 0; k < params_->GetNumTreeRLabels(); ++k) {
+  size_t tree_r_label_idx  = challenge_ & C::GetChallengeStartMask();
+  for (size_t k = 0; k < C::GetNumTreeRLabels(); ++k) {
     std::memcpy(tree_r_nodes_ + k, &(replica_buf[tree_r_label_idx]),
                 sizeof(node_t));
     tree_r_label_idx++;
@@ -111,13 +109,13 @@ size_t C1Challenge<C>::WriteTreeProof(uint8_t* file_ptr, size_t buf_index,
   // Build Tree D inclusion proof
   ///////////////////////////////////////
   if (tree_d_buf == nullptr) {
-    TreeDCCProof tree_d(params_->GetNumTreeDArity(),
-                        params_->GetNumTreeDLevels(), nullptr, 0, 0);
+    TreeDCCProof tree_d(C::GetNumTreeDArity(),
+                        C::GetNumTreeDLevels(), nullptr, 0, 0);
     tree_d.GenInclusionPath(challenge_, (node_t*) CC_TREE_D_NODE_VALUES);
     buf_index = tree_d.WriteProof(file_ptr, buf_index, SINGLE_PROOF_DATA);
   } else {
-    TreeProof tree_d(params_->GetNumTreeDArity(),
-                     params_->GetNumTreeDLevels(), &tree_d_buf, 1, 0);
+    TreeProof tree_d(C::GetNumTreeDArity(),
+                     C::GetNumTreeDLevels(), &tree_d_buf, 1, 0);
     tree_d.SetRoot(tree_d_root_);
     tree_d.GenInclusionPath(challenge_, nullptr);
     buf_index = tree_d.WriteProof(file_ptr, buf_index, SINGLE_PROOF_DATA);
@@ -126,14 +124,14 @@ size_t C1Challenge<C>::WriteTreeProof(uint8_t* file_ptr, size_t buf_index,
   ///////////////////////////////////////
   // Build Tree R inclusion proof
   ///////////////////////////////////////
-  TreeProof tree_r(params_->GetNumTreeRCArity(),
-                   params_->GetNumTreeRCLevels(), tree_r_bufs,
-                   params_->GetNumTreeRCFiles(),
-                   params_->GetNumTreeRDiscardRows());
+  TreeProof tree_r(C::GetNumTreeRCArity(),
+                   C::GetNumTreeRCLevels(), tree_r_bufs,
+                   C::GetNumTreeRCFiles(),
+                   C::GetNumTreeRDiscardRows());
   tree_r.SetRoot(tree_r_root_);
   tree_r.GenInclusionPath(challenge_, tree_r_nodes_);
   buf_index = tree_r.WriteProof(file_ptr, buf_index,
-                                params_->GetNumTreeRCConfig());
+                                C::GetNumTreeRCConfig());
 
   return buf_index;
 }
@@ -144,11 +142,11 @@ size_t C1Challenge<C>::WriteNodeProof(uint8_t* file_ptr, size_t buf_index,
   ///////////////////////////////////////
   // Column proofs
   ///////////////////////////////////////
-  ColumnProof c_x = ColumnProof(challenge_, params_,
-                                nodes_, 0, (PARENT_COUNT + 1),
-                                tree_c_bufs, tree_c_root_);
+  ColumnProof c_x = ColumnProof<C>(challenge_,
+                                   nodes_, 0, (PARENT_COUNT + 1),
+                                   tree_c_bufs, tree_c_root_);
   buf_index = c_x.WriteProof(file_ptr, buf_index,
-                             params_->GetNumTreeRCConfig());
+                             C::GetNumTreeRCConfig());
 
   ///////////////////////////////////////
   // DRG Parents
@@ -157,11 +155,11 @@ size_t C1Challenge<C>::WriteNodeProof(uint8_t* file_ptr, size_t buf_index,
   buf_index += sizeof(uint64_t);
 
   for (size_t k = 0; k < PARENT_COUNT_BASE; ++k) {
-    ColumnProof drg = ColumnProof(drg_parents_[k], params_,
-                                  nodes_, k + 1, (PARENT_COUNT + 1),
-                                  tree_c_bufs, tree_c_root_);
+    ColumnProof drg = ColumnProof<C>(drg_parents_[k],
+                                     nodes_, k + 1, (PARENT_COUNT + 1),
+                                     tree_c_bufs, tree_c_root_);
     buf_index = drg.WriteProof(file_ptr, buf_index,
-                               params_->GetNumTreeRCConfig());
+                               C::GetNumTreeRCConfig());
   }
 
   ///////////////////////////////////////
@@ -171,18 +169,18 @@ size_t C1Challenge<C>::WriteNodeProof(uint8_t* file_ptr, size_t buf_index,
   buf_index += sizeof(uint64_t);
 
   for (size_t k = 0; k < PARENT_COUNT_EXP; ++k) {
-    ColumnProof exp = ColumnProof(exp_parents_[k], params_, nodes_,
-                                  k + 1 + PARENT_COUNT_BASE,
-                                  (PARENT_COUNT + 1),
-                                  tree_c_bufs, tree_c_root_);
+    ColumnProof exp = ColumnProof<C>(exp_parents_[k], nodes_,
+                                     k + 1 + PARENT_COUNT_BASE,
+                                     (PARENT_COUNT + 1),
+                                     tree_c_bufs, tree_c_root_);
     buf_index = exp.WriteProof(file_ptr, buf_index,
-                               params_->GetNumTreeRCConfig());
+                               C::GetNumTreeRCConfig());
   }
 
   ///////////////////////////////////////
   // Labeling Proofs
   ///////////////////////////////////////
-  size_t layer_count = params_->GetNumLayers();
+  size_t layer_count = C::GetNumLayers();
   LabelProof label_proof(challenge_, layer_count, nodes_, (PARENT_COUNT + 1));
   buf_index = label_proof.WriteProof(file_ptr, buf_index);
 
