@@ -225,6 +225,8 @@ During the build process it will clone and build SPDK, sppark, and blst.
 ./build.sh
 ```
 
+By default it builds with support for 512MiB and 32GiB sector sizes. For other sector sizes compile with `./build.sh -r`.
+
 SPDK must be setup after every reboot:
 ```
 cd deps/spdk-v22.09
