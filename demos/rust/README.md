@@ -43,24 +43,24 @@ flowchart TD;
 
 Currently configured to run 3 pipelines of 32 sectors.
 
-First make sure the supraseal-c2 library is setup in ../../c2
-
-Also make sure the core library has been built:
+Make sure the core library has been built:
 ```
-./build.sh 512MiB
-
-or for 32GiB sectors:
 ./build.sh
+```
+
+For sector sizes other than 512MiB or 32GiB, use `./build.sh -r`.
+
+Build the Rust part:
+```
+cargo build --release
 ```
 
 512MB Sectors
 ```
-cargo build --release --features=512MiB --no-default-features
-sudo ./target/release/supra-seal-demo
+sudo ./target/release/supra-seal-demo 512MiB
 ```
 
 32GB Sectors
 ```
-cargo build --release --features=32GiB --no-default-features
-sudo ./target/release/supra-seal-demo
+sudo ./target/release/supra-seal-demo 32GiB
 ```
